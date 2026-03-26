@@ -1,6 +1,7 @@
-// pdfjs-dist is ESM-only — use dynamic import inside async function.
-// It is listed in serverExternalPackages so webpack won't bundle it;
-// Node.js loads it natively from node_modules at runtime.
+// unpdf handles pdfjs-dist worker setup automatically for serverless environments.
+// We use getDocumentProxy (worker-safe) then iterate pages natively for
+// per-page error recovery — bad pages are skipped, not whole-document crashes.
+import { getDocumentProxy } from 'unpdf';
 
 export interface PdfPage {
   pageNumber: number;
@@ -14,35 +15,27 @@ export interface PdfExtractionResult {
 }
 
 export async function extractPdfText(buffer: Buffer): Promise<PdfExtractionResult> {
-  // Dynamic import — works in Node.js 18+ even from CJS context
-  const pdfjsLib = await import('pdfjs-dist');
-
-  // No web worker needed in serverless Node.js environment
-  pdfjsLib.GlobalWorkerOptions.workerSrc = '';
-
   const uint8Array = new Uint8Array(buffer);
-  const loadingTask = pdfjsLib.getDocument({
-    data: uint8Array,
-    useSystemFonts: true,   // avoid font-loading errors
-    disableFontFace: true,  // not needed for text extraction
-    verbosity: 0,           // suppress pdfjs console warnings
-  });
 
-  let pdfDoc: Awaited<typeof loadingTask.promise>;
+  let proxy: Awaited<ReturnType<typeof getDocumentProxy>>;
   try {
-    pdfDoc = await loadingTask.promise;
+    proxy = await getDocumentProxy(uint8Array, {
+      useSystemFonts: true,
+      disableFontFace: true,
+      verbosity: 0,
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Could not open PDF: ${msg}. Check the file is not password-protected or corrupted.`);
+    throw new Error(`Could not open PDF: ${msg}`);
   }
 
+  const totalPages = proxy.numPages;
   const pages: PdfPage[] = [];
 
-  for (let i = 1; i <= pdfDoc.numPages; i++) {
+  for (let i = 1; i <= totalPages; i++) {
     try {
-      const page = await pdfDoc.getPage(i);
+      const page = await proxy.getPage(i);
       const textContent = await page.getTextContent();
-      // TextContent items are either TextItem (has .str) or TextMarkedContent (no .str)
       const text = (textContent.items as Array<{ str?: string }>)
         .filter((item) => item.str)
         .map((item) => item.str!)
@@ -52,15 +45,14 @@ export async function extractPdfText(buffer: Buffer): Promise<PdfExtractionResul
         pages.push({ pageNumber: i, text });
       }
     } catch (pageErr) {
-      // Skip this page and continue — don't fail the whole document
       const msg = pageErr instanceof Error ? pageErr.message : String(pageErr);
-      console.warn(`PDF page ${i} skipped (${msg})`);
+      console.warn(`PDF page ${i} skipped: ${msg}`);
     }
   }
 
   return {
     pages,
-    totalPages: pdfDoc.numPages,
+    totalPages,
     fullText: pages.map((p) => p.text).join('\n\n'),
   };
 }
@@ -76,13 +68,9 @@ export function chunkText(
   overlapTokens = 50,
   pageNumber?: number
 ): TextChunk[] {
-  // Approximate tokens by words (1 token ≈ 0.75 words)
   const wordsPerChunk = Math.floor(maxTokens * 0.75);
   const overlapWords = Math.floor(overlapTokens * 0.75);
-
-  // Split on double newlines first (paragraphs)
   const paragraphs = text.split(/\n\n+/).filter((p) => p.trim().length > 0);
-
   const chunks: TextChunk[] = [];
   let currentChunk: string[] = [];
   let currentWordCount = 0;
@@ -91,7 +79,6 @@ export function chunkText(
     const words = paragraph.split(/\s+/);
     if (currentWordCount + words.length > wordsPerChunk && currentChunk.length > 0) {
       chunks.push({ text: currentChunk.join(' '), pageNumber });
-      // Keep overlap
       const overlapStart = Math.max(0, currentChunk.length - overlapWords);
       currentChunk = currentChunk.slice(overlapStart);
       currentWordCount = currentChunk.join(' ').split(/\s+/).length;
@@ -117,7 +104,6 @@ export function extractSkusFromText(text: string, knownSkus: string[]): string[]
     }
   }
 
-  // Also try regex pattern for common SKU formats
   const skuPattern = /\b[A-Z]{2,5}[-_]?[\dA-Z]{2,10}(?:[-_][\dA-Z]{1,10})*\b/g;
   const regexMatches = text.match(skuPattern) ?? [];
 

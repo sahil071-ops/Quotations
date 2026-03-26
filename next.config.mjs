@@ -1,10 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Prevent webpack from bundling pdfjs-dist (ESM-only); Node.js loads it
-  // natively from node_modules at runtime via dynamic import().
-  serverExternalPackages: ['pdfjs-dist'],
+  // unpdf (and its bundled pdfjs-dist) must not be bundled by webpack —
+  // it configures its own worker at runtime from node_modules.
+  serverExternalPackages: ['unpdf'],
   experimental: {
-    serverComponentsExternalPackages: ['pdfjs-dist'],
+    serverComponentsExternalPackages: ['unpdf'],
     // Increase max body size for PDF uploads (10MB)
     serverActions: {
       bodySizeLimit: '10mb',
