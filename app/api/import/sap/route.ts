@@ -3,20 +3,6 @@ import { createAdminSupabaseClient } from '@/lib/supabase';
 import { embedText, buildProductEmbeddingText, contentHash } from '@/lib/embeddings';
 import * as XLSX from 'xlsx';
 
-interface SapRow {
-  sku?: string;
-  part_number?: string;
-  'part number'?: string;
-  name?: string;
-  description?: string;
-  product_name?: string;
-  'product name'?: string;
-  family?: string;
-  category?: string;
-  countries?: string;
-  regions?: string;
-  [key: string]: unknown;
-}
 
 function normalizeKey(key: string): string {
   return key.toLowerCase().replace(/[\s_-]+/g, '_').trim();

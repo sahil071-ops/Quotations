@@ -18,7 +18,7 @@ interface UploadModalProps {
   onUploaded: (doc: CatalogDocument) => void;
 }
 
-function UploadModal({ onClose, onUploaded }: UploadModalProps) {
+function UploadModal({ onClose }: UploadModalProps) {
   const [file, setFile] = useState<File | null>(null);
   const [family, setFamily] = useState('');
   const [countries, setCountries] = useState<string[]>([]);

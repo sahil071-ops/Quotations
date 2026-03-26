@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createAdminSupabaseClient, createServerSupabaseClient } from '@/lib/supabase';
+import { createAdminSupabaseClient } from '@/lib/supabase';
 import { embedText } from '@/lib/embeddings';
 import { rankProductMatches, detectLanguage } from '@/lib/claude';
 import type { MatchResult, QueryMatchResponse } from '@/types';
@@ -17,7 +17,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'query and country are required' }, { status: 400 });
     }
 
-    const supabase = createServerSupabaseClient();
     const adminSupabase = createAdminSupabaseClient();
 
     // 1. Detect language
@@ -71,7 +70,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Search failed' }, { status: 500 });
     }
 
-    let candidates = vectorResults ?? [];
+    const candidates = vectorResults ?? [];
 
     // 6. Boost competitor SKUs and feedback corrections to top
     const boostedSkus = Array.from(new Set([...competitorBoosts, ...feedbackBoostSkus]));

@@ -23,7 +23,6 @@ export default function FeedbackModal({ isOpen, onClose, onSubmit, match, isSubm
   const [notes, setNotes] = useState('');
   const [suggestions, setSuggestions] = useState<ProductSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [searching, setSearching] = useState(false);
   const searchRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
@@ -39,14 +38,13 @@ export default function FeedbackModal({ isOpen, onClose, onSubmit, match, isSubm
       setSuggestions([]);
       return;
     }
-    setSearching(true);
     try {
       const res = await fetch(`/api/products/search?q=${encodeURIComponent(q)}&limit=8`);
       const data = await res.json();
       setSuggestions(data.products ?? []);
       setShowSuggestions(true);
-    } finally {
-      setSearching(false);
+    } catch {
+      // ignore search errors
     }
   };
 
