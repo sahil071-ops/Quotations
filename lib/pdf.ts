@@ -1,5 +1,10 @@
+// Use internal path to avoid pdf-parse loading its test files at import time,
+// which crashes in serverless environments (Vercel) where the files don't exist.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParse = require('pdf-parse') as (buffer: Buffer, options?: Record<string, unknown>) => Promise<{ numpages: number; text: string }>;
+const pdfParse = require('pdf-parse/lib/pdf-parse.js') as (
+  buffer: Buffer,
+  options?: Record<string, unknown>
+) => Promise<{ numpages: number; text: string }>;
 
 export interface PdfPage {
   pageNumber: number;
