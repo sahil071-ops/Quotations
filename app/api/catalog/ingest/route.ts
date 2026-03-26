@@ -132,7 +132,8 @@ export async function POST(req: NextRequest) {
       throw ingestErr;
     }
   } catch (err) {
-    console.error('Ingest error:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('Ingest error:', message, err);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

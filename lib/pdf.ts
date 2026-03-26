@@ -19,9 +19,16 @@ export interface PdfExtractionResult {
 }
 
 export async function extractPdfText(buffer: Buffer): Promise<PdfExtractionResult> {
-  // Use no options — the pagerender callback requires pdfjs internals that
-  // are unreliable in serverless. Split on form-feed chars (\f) instead.
-  const result = await pdfParse(buffer);
+  // pdf-parse uses pdfjs-dist internally. Some PDFs cause pdfjs to throw
+  // "The string did not match the expected pattern" from internal color-space
+  // or font parsing. Catch and rethrow with a clearer message.
+  let result: { numpages: number; text: string };
+  try {
+    result = await pdfParse(buffer);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`PDF parsing failed: ${msg}. The PDF may be encrypted, corrupted, or use unsupported features.`);
+  }
 
   // pdf-parse separates pages with \f (form feed) in result.text
   const rawPages = result.text.split('\f');
