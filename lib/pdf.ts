@@ -1,7 +1,8 @@
-// Use internal path to avoid pdf-parse loading its test files at import time,
-// which crashes in serverless environments (Vercel) where the files don't exist.
+// Use require() so Next.js treats this as a server external (per next.config.mjs
+// serverComponentsExternalPackages). When externalized, Node.js loads pdf-parse
+// from node_modules at runtime — test files exist there and won't crash.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParse = require('pdf-parse/lib/pdf-parse.js') as (
+const pdfParse = require('pdf-parse') as (
   buffer: Buffer,
   options?: Record<string, unknown>
 ) => Promise<{ numpages: number; text: string }>;
