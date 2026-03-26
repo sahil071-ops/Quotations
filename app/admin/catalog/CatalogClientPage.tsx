@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import toast from 'react-hot-toast';
 import { Upload, RefreshCw, Trash2, FileText, Loader2, X } from 'lucide-react';
 import type { CatalogDocument } from '@/types';
-import { AXIS_COUNTRIES } from '@/constants/countries';
+import { AXIS_REGIONS } from '@/constants/countries';
 
 const STATUS_STYLES: Record<string, string> = {
   pending: 'bg-gray-100 text-gray-700',
@@ -24,7 +25,14 @@ function UploadModal({ onClose }: UploadModalProps) {
   const [countries, setCountries] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [ingesting, setIngesting] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    createBrowserSupabaseClient().auth.getUser().then(({ data }) => {
+      setUserId(data.user?.id ?? null);
+    });
+  }, []);
 
   const toggleCountry = (code: string) => {
     setCountries((prev) =>
@@ -41,6 +49,7 @@ function UploadModal({ onClose }: UploadModalProps) {
     formData.append('file', file);
     formData.append('product_family', family);
     formData.append('countries', JSON.stringify(countries));
+    if (userId) formData.append('uploader_id', userId);
 
     let docId: string | null = null;
     try {
@@ -121,22 +130,22 @@ function UploadModal({ onClose }: UploadModalProps) {
             />
           </div>
 
-          {/* Countries */}
+          {/* Regions */}
           <div>
-            <label className="mb-2 block text-sm font-medium text-gray-700">Applicable countries</label>
+            <label className="mb-2 block text-sm font-medium text-gray-700">Applicable regions</label>
             <div className="flex flex-wrap gap-2">
-              {AXIS_COUNTRIES.map((c) => (
+              {AXIS_REGIONS.map((r) => (
                 <button
-                  key={c.code}
+                  key={r.code}
                   type="button"
-                  onClick={() => toggleCountry(c.code)}
+                  onClick={() => toggleCountry(r.code)}
                   className={`rounded-full px-3 py-1 text-xs font-medium border transition-colors ${
-                    countries.includes(c.code)
+                    countries.includes(r.code)
                       ? 'bg-blue-900 text-white border-blue-900'
                       : 'border-gray-300 text-gray-600 hover:border-blue-900'
                   }`}
                 >
-                  {c.code}
+                  {r.name}
                 </button>
               ))}
             </div>

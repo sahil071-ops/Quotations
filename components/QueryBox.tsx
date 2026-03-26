@@ -38,7 +38,7 @@ export default function QueryBox({ onSubmit, isLoading }: QueryBoxProps) {
       <div className="flex items-end gap-3">
         <div className="flex-1">
           <label className="mb-1.5 block text-sm font-medium text-gray-700">
-            Country <span className="text-red-500">*</span>
+            Region <span className="text-red-500">*</span>
           </label>
           <CountrySelector value={country} onChange={setCountry} disabled={isLoading} />
         </div>
