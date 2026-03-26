@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { LogOut, Search, LayoutDashboard, Settings } from 'lucide-react';
-import { createBrowserSupabaseClient } from '@/lib/supabase';
+import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 
 interface NavbarProps {
   role?: 'engineer' | 'admin';

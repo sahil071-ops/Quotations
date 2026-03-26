@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { CheckCircle, Loader2, Filter } from 'lucide-react';
 import type { Feedback } from '@/types';
-import { createBrowserSupabaseClient } from '@/lib/supabase';
+import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 
 export default function FeedbackClientPage() {
   const [feedback, setFeedback] = useState<Feedback[]>([]);

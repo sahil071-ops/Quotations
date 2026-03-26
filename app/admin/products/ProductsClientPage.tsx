@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { Search, RefreshCw, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
-import { createBrowserSupabaseClient } from '@/lib/supabase';
+import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import type { Product } from '@/types';
 
 export default function ProductsClientPage() {
