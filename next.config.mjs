@@ -1,7 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Next.js 14.1+ stable key — prevents webpack from bundling pdf-parse,
+  // so it loads from node_modules at runtime (test files exist there).
+  serverExternalPackages: ['pdf-parse'],
   experimental: {
-    // Required for pdf-parse which uses Node.js APIs (Next.js 14 key)
+    // Legacy key kept for compatibility with older 14.x patch versions
     serverComponentsExternalPackages: ['pdf-parse'],
     // Increase max body size for PDF uploads (10MB)
     serverActions: {
