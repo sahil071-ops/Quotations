@@ -47,15 +47,22 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // Check admin routes
+  // Check admin routes — use service role key via REST to bypass RLS
   if (ADMIN_ROUTES.some((r) => pathname.startsWith(r))) {
-    const { data: profile } = await supabase
-      .from('users_profile')
-      .select('role')
-      .eq('id', user.id)
-      .single();
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+    const profileRes = await fetch(
+      `${supabaseUrl}/rest/v1/users_profile?id=eq.${user.id}&select=role&limit=1`,
+      {
+        headers: {
+          apikey: serviceRoleKey,
+          Authorization: `Bearer ${serviceRoleKey}`,
+        },
+      }
+    );
+    const profiles = await profileRes.json();
+    const role = profiles?.[0]?.role;
 
-    if (!profile || profile.role !== 'admin') {
+    if (role !== 'admin') {
       return NextResponse.redirect(new URL('/dashboard', request.url));
     }
   }

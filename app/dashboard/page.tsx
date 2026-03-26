@@ -1,4 +1,4 @@
-import { createServerSupabaseClient } from '@/lib/supabase';
+import { createServerSupabaseClient, createAdminSupabaseClient } from '@/lib/supabase';
 import Navbar from '@/components/Navbar';
 import Link from 'next/link';
 import { Search, Clock, CheckCircle, AlertCircle } from 'lucide-react';
@@ -9,7 +9,8 @@ export default async function DashboardPage() {
   const supabase = createServerSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  const { data: profile } = await supabase
+  const adminSupabase = createAdminSupabaseClient();
+  const { data: profile } = await adminSupabase
     .from('users_profile')
     .select('full_name, role')
     .eq('id', user!.id)
