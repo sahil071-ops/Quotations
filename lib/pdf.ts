@@ -1,11 +1,6 @@
-// Use require() so Next.js treats this as a server external (per next.config.mjs
-// serverComponentsExternalPackages). When externalized, Node.js loads pdf-parse
-// from node_modules at runtime — test files exist there and won't crash.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParse = require('pdf-parse') as (
-  buffer: Buffer,
-  options?: Record<string, unknown>
-) => Promise<{ numpages: number; text: string }>;
+// pdfjs-dist is ESM-only — use dynamic import inside async function.
+// It is listed in serverExternalPackages so webpack won't bundle it;
+// Node.js loads it natively from node_modules at runtime.
 
 export interface PdfPage {
   pageNumber: number;
@@ -19,31 +14,54 @@ export interface PdfExtractionResult {
 }
 
 export async function extractPdfText(buffer: Buffer): Promise<PdfExtractionResult> {
-  // pdf-parse uses pdfjs-dist internally. Some PDFs cause pdfjs to throw
-  // "The string did not match the expected pattern" from internal color-space
-  // or font parsing. Catch and rethrow with a clearer message.
-  let result: { numpages: number; text: string };
+  // Dynamic import — works in Node.js 18+ even from CJS context
+  const pdfjsLib = await import('pdfjs-dist');
+
+  // No web worker needed in serverless Node.js environment
+  pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+
+  const uint8Array = new Uint8Array(buffer);
+  const loadingTask = pdfjsLib.getDocument({
+    data: uint8Array,
+    useSystemFonts: true,   // avoid font-loading errors
+    disableFontFace: true,  // not needed for text extraction
+    verbosity: 0,           // suppress pdfjs console warnings
+  });
+
+  let pdfDoc: Awaited<typeof loadingTask.promise>;
   try {
-    result = await pdfParse(buffer);
+    pdfDoc = await loadingTask.promise;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`PDF parsing failed: ${msg}. The PDF may be encrypted, corrupted, or use unsupported features.`);
+    throw new Error(`Could not open PDF: ${msg}. Check the file is not password-protected or corrupted.`);
   }
 
-  // pdf-parse separates pages with \f (form feed) in result.text
-  const rawPages = result.text.split('\f');
-  const pages: PdfPage[] = rawPages
-    .map((text, i) => ({ pageNumber: i + 1, text: text.trim() }))
-    .filter((p) => p.text.length > 0);
+  const pages: PdfPage[] = [];
 
-  if (pages.length === 0) {
-    pages.push({ pageNumber: 1, text: result.text.trim() });
+  for (let i = 1; i <= pdfDoc.numPages; i++) {
+    try {
+      const page = await pdfDoc.getPage(i);
+      const textContent = await page.getTextContent();
+      // TextContent items are either TextItem (has .str) or TextMarkedContent (no .str)
+      const text = (textContent.items as Array<{ str?: string }>)
+        .filter((item) => item.str)
+        .map((item) => item.str!)
+        .join(' ')
+        .trim();
+      if (text) {
+        pages.push({ pageNumber: i, text });
+      }
+    } catch (pageErr) {
+      // Skip this page and continue — don't fail the whole document
+      const msg = pageErr instanceof Error ? pageErr.message : String(pageErr);
+      console.warn(`PDF page ${i} skipped (${msg})`);
+    }
   }
 
   return {
     pages,
-    totalPages: result.numpages,
-    fullText: result.text,
+    totalPages: pdfDoc.numPages,
+    fullText: pages.map((p) => p.text).join('\n\n'),
   };
 }
 
