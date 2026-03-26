@@ -18,20 +18,19 @@ export interface PdfExtractionResult {
 }
 
 export async function extractPdfText(buffer: Buffer): Promise<PdfExtractionResult> {
-  const pages: PdfPage[] = [];
+  // Use no options — the pagerender callback requires pdfjs internals that
+  // are unreliable in serverless. Split on form-feed chars (\f) instead.
+  const result = await pdfParse(buffer);
 
-  // Extract with page tracking
-  let pageNumber = 0;
-  const result = await pdfParse(buffer, {
-    pagerender: (pageData: { getTextContent: () => Promise<{ items: Array<{ str: string }> }> }) => {
-      return pageData.getTextContent().then((textContent: { items: Array<{ str: string }> }) => {
-        const pageText = textContent.items.map((item) => item.str).join(' ');
-        pageNumber++;
-        pages.push({ pageNumber, text: pageText });
-        return pageText;
-      });
-    },
-  });
+  // pdf-parse separates pages with \f (form feed) in result.text
+  const rawPages = result.text.split('\f');
+  const pages: PdfPage[] = rawPages
+    .map((text, i) => ({ pageNumber: i + 1, text: text.trim() }))
+    .filter((p) => p.text.length > 0);
+
+  if (pages.length === 0) {
+    pages.push({ pageNumber: 1, text: result.text.trim() });
+  }
 
   return {
     pages,
