@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { Upload, RefreshCw, Trash2, FileText, Loader2, X } from 'lucide-react';
 import type { CatalogDocument } from '@/types';
 import { AXIS_REGIONS } from '@/constants/countries';
+import CategorySelector from '@/components/CategorySelector';
 
 const STATUS_STYLES: Record<string, string> = {
   pending: 'bg-gray-100 text-gray-700',
@@ -21,7 +22,8 @@ interface UploadModalProps {
 
 function UploadModal({ onClose }: UploadModalProps) {
   const [file, setFile] = useState<File | null>(null);
-  const [family, setFamily] = useState('');
+  const [mainCategories, setMainCategories] = useState<string[]>([]);
+  const [subCategories, setSubCategories] = useState<string[]>([]);
   const [countries, setCountries] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [ingesting, setIngesting] = useState(false);
@@ -47,7 +49,8 @@ function UploadModal({ onClose }: UploadModalProps) {
     setUploading(true);
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('product_family', family);
+    formData.append('main_categories', JSON.stringify(mainCategories));
+    formData.append('sub_categories', JSON.stringify(subCategories));
     formData.append('countries', JSON.stringify(countries));
     if (userId) formData.append('uploader_id', userId);
 
@@ -118,21 +121,28 @@ function UploadModal({ onClose }: UploadModalProps) {
             />
           </div>
 
-          {/* Family */}
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">Product family</label>
-            <input
-              type="text"
-              value={family}
-              onChange={(e) => setFamily(e.target.value)}
-              placeholder="e.g. Motor Protection"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-900 focus:outline-none focus:ring-1 focus:ring-blue-900"
-            />
-          </div>
+          {/* Categories */}
+          <CategorySelector
+            selectedMains={mainCategories}
+            selectedSubs={subCategories}
+            onChangeMains={setMainCategories}
+            onChangeSubs={setSubCategories}
+          />
 
           {/* Regions */}
           <div>
-            <label className="mb-2 block text-sm font-medium text-gray-700">Applicable regions</label>
+            <div className="mb-2 flex items-center justify-between">
+              <label className="text-sm font-medium text-gray-700">Applicable regions</label>
+              <button
+                type="button"
+                onClick={() =>
+                  setCountries(countries.length === AXIS_REGIONS.length ? [] : AXIS_REGIONS.map((r) => r.code))
+                }
+                className="text-xs text-blue-700 hover:text-blue-900"
+              >
+                {countries.length === AXIS_REGIONS.length ? 'Clear all' : 'Select all'}
+              </button>
+            </div>
             <div className="flex flex-wrap gap-2">
               {AXIS_REGIONS.map((r) => (
                 <button

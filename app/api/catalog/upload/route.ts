@@ -8,9 +8,13 @@ export async function POST(req: NextRequest) {
     // Parse form data first before any other async operations
     const formData = await req.formData();
     const file = formData.get('file') as File | null;
-    const productFamily = formData.get('product_family') as string | null;
+    const mainCategoriesRaw = formData.get('main_categories') as string | null;
+    const subCategoriesRaw = formData.get('sub_categories') as string | null;
     const regionsRaw = formData.get('countries') as string | null;
     const uploaderIdRaw = formData.get('uploader_id') as string | null;
+
+    const mainCategories: string[] = mainCategoriesRaw ? JSON.parse(mainCategoriesRaw) : [];
+    const subCategories: string[] = subCategoriesRaw ? JSON.parse(subCategoriesRaw) : [];
 
     if (!file) {
       return NextResponse.json({ error: 'file is required' }, { status: 400 });
@@ -40,7 +44,8 @@ export async function POST(req: NextRequest) {
       .insert({
         filename: file.name,
         r2_key: r2Key,
-        product_family: productFamily ?? null,
+        product_family: mainCategories.join(', ') || null,
+        sub_categories: subCategories.length > 0 ? subCategories : null,
         countries: regions,
         status: 'pending',
         uploaded_by: uploaderIdRaw ?? null,

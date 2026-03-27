@@ -253,3 +253,27 @@ as $$
   order by distance asc
   limit match_count;
 $$;
+
+-- ============================================================
+-- MIGRATION: run these in Supabase SQL editor if upgrading
+-- ============================================================
+
+-- Hierarchical product categories
+create table if not exists product_categories (
+  id uuid primary key default gen_random_uuid(),
+  main_category text not null,
+  sub_category text not null,
+  created_at timestamptz default now(),
+  unique(main_category, sub_category)
+);
+
+alter table product_categories enable row level security;
+create policy "Authenticated users can read categories"
+  on product_categories for select using (auth.role() = 'authenticated');
+create policy "Admins can modify categories"
+  on product_categories for all using (
+    exists (select 1 from users_profile where id = auth.uid() and role = 'admin')
+  );
+
+-- Add sub_categories column to catalog_documents
+alter table catalog_documents add column if not exists sub_categories text[];

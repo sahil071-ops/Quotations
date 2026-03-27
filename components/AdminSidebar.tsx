@@ -9,6 +9,8 @@ import {
   Package,
   Upload,
   ChevronLeft,
+  BookOpen,
+  Tag,
 } from 'lucide-react';
 
 const ADMIN_LINKS = [
@@ -17,6 +19,8 @@ const ADMIN_LINKS = [
   { href: '/admin/feedback', label: 'Feedback', icon: MessageSquare },
   { href: '/admin/products', label: 'Products', icon: Package },
   { href: '/admin/import', label: 'Import', icon: Upload },
+  { href: '/admin/training', label: 'Training Data', icon: BookOpen },
+  { href: '/admin/categories', label: 'Categories', icon: Tag },
 ];
 
 export default function AdminSidebar() {
