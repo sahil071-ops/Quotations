@@ -242,7 +242,7 @@ export default function CatalogClientPage({ initialDocuments }: { initialDocumen
           <table className="w-full text-sm">
             <thead className="border-b border-gray-200 bg-gray-50">
               <tr>
-                {['Filename', 'Family', 'Countries', 'Pages', 'Status', 'Uploaded', 'Actions'].map((h) => (
+                {['Filename', 'Categories', 'Countries', 'Pages', 'Status', 'Uploaded', 'Actions'].map((h) => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
                 ))}
               </tr>
@@ -256,7 +256,14 @@ export default function CatalogClientPage({ initialDocuments }: { initialDocumen
                       <span className="font-medium text-gray-900 max-w-xs truncate">{doc.filename}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-gray-600">{doc.product_family ?? '—'}</td>
+                  <td className="px-4 py-3 text-gray-600">
+                    {(doc as CatalogDocument & { main_categories?: string[]; sub_categories?: string[] }).main_categories?.join(', ') || doc.product_family || '—'}
+                    {(doc as CatalogDocument & { sub_categories?: string[] }).sub_categories?.length ? (
+                      <div className="mt-0.5 text-xs text-gray-400">
+                        {(doc as CatalogDocument & { sub_categories?: string[] }).sub_categories!.join(', ')}
+                      </div>
+                    ) : null}
+                  </td>
                   <td className="px-4 py-3 text-gray-600">{doc.countries?.join(', ') ?? '—'}</td>
                   <td className="px-4 py-3 text-gray-600">{doc.page_count ?? '—'}</td>
                   <td className="px-4 py-3">
