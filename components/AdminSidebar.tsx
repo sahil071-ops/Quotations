@@ -12,6 +12,7 @@ import {
   BookOpen,
   Tag,
 } from 'lucide-react';
+import { VersionBadge } from '@/components/VersionBadge';
 
 const ADMIN_LINKS = [
   { href: '/admin/catalog', label: 'Catalog PDFs', icon: FileText },
@@ -55,6 +56,9 @@ export default function AdminSidebar() {
           </Link>
         ))}
       </nav>
+      <div className="mt-auto px-2 pt-4">
+        <VersionBadge />
+      </div>
     </aside>
   );
 }

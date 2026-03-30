@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabaseClient } from '@/lib/supabase';
 import { embedText, buildProductEmbeddingText, contentHash } from '@/lib/embeddings';
-import * as XLSX from 'xlsx';
 
 
 function normalizeKey(key: string): string {
@@ -18,6 +17,8 @@ function extractField(row: Record<string, unknown>, ...candidates: string[]): st
 
 export async function POST(req: NextRequest) {
   try {
+    // Dynamic import — xlsx must not be bundled by webpack (serverExternalPackages)
+    const XLSX = await import('xlsx');
     const { searchParams } = new URL(req.url);
     const formData = await req.formData();
     const file = formData.get('file') as File | null;
