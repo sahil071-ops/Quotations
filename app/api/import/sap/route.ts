@@ -176,8 +176,9 @@ export async function POST(req: NextRequest) {
       errors: errors.slice(0, 20),
     });
   } catch (err) {
-    console.error('SAP import error:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('SAP import error:', message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
