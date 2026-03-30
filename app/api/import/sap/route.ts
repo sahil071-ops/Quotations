@@ -18,13 +18,25 @@ function extractField(row: Record<string, unknown>, ...candidates: string[]): st
 
 export async function POST(req: NextRequest) {
   try {
+    const { searchParams } = new URL(req.url);
     const formData = await req.formData();
     const file = formData.get('file') as File | null;
-    const mappingRaw = formData.get('column_mapping') as string | null;
 
     if (!file) {
       return NextResponse.json({ error: 'file is required' }, { status: 400 });
     }
+
+    // Headers-only mode: just return column names for the mapping UI
+    if (searchParams.get('headers') === '1') {
+      const buffer = Buffer.from(await file.arrayBuffer());
+      const workbook = XLSX.read(buffer, { type: 'buffer' });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1 });
+      const headers = (rows[0] as string[]) ?? [];
+      return NextResponse.json({ headers });
+    }
+
+    const mappingRaw = formData.get('column_mapping') as string | null;
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const workbook = XLSX.read(buffer, { type: 'buffer' });
@@ -169,21 +181,8 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// Return headers for column mapping UI
-export async function GET(req: NextRequest) {
-  try {
-    const formData = await req.formData();
-    const file = formData.get('file') as File | null;
-    if (!file) return NextResponse.json({ error: 'file required' }, { status: 400 });
-
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const workbook = XLSX.read(buffer, { type: 'buffer' });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1 });
-    const headers = (rows[0] as string[]) ?? [];
-
-    return NextResponse.json({ headers });
-  } catch {
-    return NextResponse.json({ error: 'Failed to read file' }, { status: 500 });
-  }
+// Return headers for column mapping UI.
+// Called via POST with ?headers=1 — GET requests cannot carry a body.
+export async function GET() {
+  return NextResponse.json({ error: 'Use POST ?headers=1 to fetch headers' }, { status: 405 });
 }

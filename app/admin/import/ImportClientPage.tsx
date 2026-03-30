@@ -47,7 +47,7 @@ function ImportPanel({
     try {
       const fd = new FormData();
       fd.append('file', f);
-      const res = await fetch(`${endpoint}?headers=1`, { method: 'GET', body: fd });
+      const res = await fetch(`${endpoint}?headers=1`, { method: 'POST', body: fd });
       if (res.ok) {
         const data = await res.json();
         if (data.headers?.length) {
