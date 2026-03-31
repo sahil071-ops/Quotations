@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { Search, RefreshCw, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
-import { createBrowserSupabaseClient } from '@/lib/supabase-browser';
 import type { Product } from '@/types';
 
 export default function ProductsClientPage() {
@@ -18,23 +17,19 @@ export default function ProductsClientPage() {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const supabase = createBrowserSupabaseClient();
-    const offset = (page - 1) * PAGE_SIZE;
-
-    let query = supabase
-      .from('products')
-      .select('*', { count: 'exact' })
-      .order('updated_at', { ascending: false })
-      .range(offset, offset + PAGE_SIZE - 1);
-
-    if (q) {
-      query = query.or(`sku.ilike.%${q}%,name.ilike.%${q}%,family.ilike.%${q}%`);
+    try {
+      const params = new URLSearchParams({ page: String(page) });
+      if (q) params.set('q', q);
+      const res = await fetch(`/api/admin/products?${params}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Failed to load products');
+      setProducts(data.products);
+      setTotal(data.total);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to load products');
+    } finally {
+      setLoading(false);
     }
-
-    const { data, count } = await query;
-    setProducts((data ?? []) as Product[]);
-    setTotal(count ?? 0);
-    setLoading(false);
   }, [page, q]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
