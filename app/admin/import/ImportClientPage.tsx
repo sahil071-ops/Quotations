@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { Upload, Loader2, FileText, AlertCircle, CheckCircle } from 'lucide-react';
+import { EmbeddingProgress } from '@/components/EmbeddingProgress';
 
 interface ImportResult {
   success: boolean;
@@ -10,6 +11,8 @@ interface ImportResult {
   upserted: number;
   reembedded?: number;
   errors: string[];
+  embeddingRequired?: boolean;
+  message?: string;
 }
 
 function ImportPanel({
@@ -17,13 +20,13 @@ function ImportPanel({
   description,
   endpoint,
   accept,
-  resultExtra,
+  showEmbedStep,
 }: {
   title: string;
   description: string;
   endpoint: string;
   accept: string;
-  resultExtra?: (result: ImportResult) => React.ReactNode;
+  showEmbedStep?: boolean;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [headers, setHeaders] = useState<string[]>([]);
@@ -43,7 +46,6 @@ function ImportPanel({
 
     if (!f) return;
 
-    // Try to get headers for mapping UI
     try {
       const fd = new FormData();
       fd.append('file', f);
@@ -56,7 +58,7 @@ function ImportPanel({
         }
       }
     } catch {
-      // Headers preview optional
+      // Headers preview is optional — silent fail is fine
     }
   };
 
@@ -76,7 +78,7 @@ function ImportPanel({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Import failed');
       setResult(data);
-      toast.success(`Imported ${data.upserted} records`);
+      toast.success(data.message ?? `Imported ${data.upserted} records`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Import failed');
     } finally {
@@ -89,8 +91,8 @@ function ImportPanel({
       <h2 className="mb-1 text-base font-semibold text-gray-900">{title}</h2>
       <p className="mb-4 text-sm text-gray-500">{description}</p>
 
-      {/* File drop */}
-      <label className="mb-4 flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 p-8 hover:border-blue-900 transition-colors">
+      {/* File picker */}
+      <label className="mb-4 flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 p-8 transition-colors hover:border-blue-900">
         {file ? (
           <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
             <FileText className="h-5 w-5 text-blue-900" />
@@ -110,16 +112,16 @@ function ImportPanel({
         />
       </label>
 
-      {/* Column mapping (SAP import only) */}
+      {/* Column mapping */}
       {showMapping && headers.length > 0 && (
         <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
           <p className="mb-3 text-sm font-medium text-amber-800">
-            Column mapping — map your file headers to expected fields (optional):
+            Map your file&apos;s column headers to the expected fields (optional — auto-detect works for standard SAP exports):
           </p>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {TARGET_FIELDS.map((target) => (
               <div key={target}>
-                <label className="mb-1 block text-xs font-medium text-gray-700">{target}</label>
+                <label className="mb-1 block text-xs font-medium text-gray-700 capitalize">{target}</label>
                 <select
                   value={mapping[target] ?? ''}
                   onChange={(e) => setMapping((prev) => ({ ...prev, [target]: e.target.value }))}
@@ -156,19 +158,29 @@ function ImportPanel({
             )}
             <span className="text-sm font-medium text-gray-900">
               {result.upserted} / {result.total_rows} records imported
-              {result.reembedded !== undefined && ` · ${result.reembedded} re-embedded`}
             </span>
           </div>
-          {resultExtra?.(result)}
+
           {result.errors.length > 0 && (
             <div className="mt-2 space-y-1">
-              <p className="text-xs font-medium text-amber-700">{result.errors.length} errors:</p>
+              <p className="text-xs font-medium text-amber-700">{result.errors.length} rows skipped:</p>
               {result.errors.slice(0, 5).map((e, i) => (
                 <p key={i} className="text-xs text-amber-600">{e}</p>
               ))}
               {result.errors.length > 5 && (
-                <p className="text-xs text-amber-500">...and {result.errors.length - 5} more</p>
+                <p className="text-xs text-amber-500">…and {result.errors.length - 5} more</p>
               )}
+            </div>
+          )}
+
+          {/* Embedding step — shown only after SAP import */}
+          {showEmbedStep && result.embeddingRequired && (
+            <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
+              <p className="mb-1 text-sm font-semibold text-blue-900">Step 2 — Make products searchable</p>
+              <p className="mb-3 text-xs text-blue-700">
+                Products are saved but not yet searchable. Generate embeddings to enable AI matching.
+              </p>
+              <EmbeddingProgress totalProducts={result.upserted} />
             </div>
           )}
         </div>
@@ -182,14 +194,10 @@ export default function ImportClientPage() {
     <div className="space-y-6">
       <ImportPanel
         title="SAP / Product Catalog Import"
-        description="Import products from a SAP export (CSV or Excel). Supports flexible column mapping. Re-embeddings are triggered automatically for changed products."
+        description="Import products from a SAP export (CSV or Excel). Step 1 saves all products. Step 2 generates embeddings to make them searchable."
         endpoint="/api/import/sap"
         accept=".xlsx,.xls,.csv"
-        resultExtra={(result) =>
-          result.reembedded !== undefined ? (
-            <p className="text-xs text-green-700">{result.reembedded} product embeddings updated</p>
-          ) : null
-        }
+        showEmbedStep
       />
 
       <ImportPanel

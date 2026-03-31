@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabaseClient } from '@/lib/supabase';
-import { embedText, buildProductEmbeddingText, contentHash } from '@/lib/embeddings';
 
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 function normalizeKey(key: string): string {
   return key.toLowerCase().replace(/[\s_-]+/g, '_').trim();
@@ -17,7 +18,6 @@ function extractField(row: Record<string, unknown>, ...candidates: string[]): st
 
 export async function POST(req: NextRequest) {
   try {
-    // Dynamic import — xlsx must not be bundled by webpack (serverExternalPackages)
     const XLSX = await import('xlsx');
     const { searchParams } = new URL(req.url);
     const formData = await req.formData();
@@ -27,28 +27,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'file is required' }, { status: 400 });
     }
 
-    // Headers-only mode: just return column names for the mapping UI
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const workbook = XLSX.read(buffer, { type: 'buffer' });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+
+    // Headers-only mode: return column names for the mapping UI
     if (searchParams.get('headers') === '1') {
-      const buffer = Buffer.from(await file.arrayBuffer());
-      const workbook = XLSX.read(buffer, { type: 'buffer' });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1 });
       const headers = (rows[0] as string[]) ?? [];
       return NextResponse.json({ headers });
     }
 
     const mappingRaw = formData.get('column_mapping') as string | null;
+    const mapping: Record<string, string> = mappingRaw ? JSON.parse(mappingRaw) : {};
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const workbook = XLSX.read(buffer, { type: 'buffer' });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
 
     if (rawRows.length === 0) {
       return NextResponse.json({ error: 'No rows found in file' }, { status: 400 });
     }
 
-    // Normalize keys
+    // Normalize all column keys
     const rows: Record<string, unknown>[] = rawRows.map((row) => {
       const normalized: Record<string, unknown> = {};
       for (const [key, val] of Object.entries(row)) {
@@ -57,134 +56,97 @@ export async function POST(req: NextRequest) {
       return normalized;
     });
 
-    // Apply custom column mapping if provided
-    const mapping: Record<string, string> = mappingRaw ? JSON.parse(mappingRaw) : {};
+    // Build product records — NO embedding in this step
+    const knownFields = new Set([
+      'sku', 'part_number', 'name', 'product_name', 'description', 'item_description',
+      'family', 'category', 'countries', 'regions', 'country', 'region',
+      'product_family', 'product_category', 'item_code', 'partnumber',
+    ]);
 
-    const adminSupabase = createAdminSupabaseClient();
-    let upserted = 0;
-    let reembedded = 0;
+    const products: Record<string, unknown>[] = [];
     const errors: string[] = [];
 
     for (const row of rows) {
-      try {
-        // Apply mapping
-        const mapped: Record<string, unknown> = { ...row };
-        for (const [target, source] of Object.entries(mapping)) {
-          if (row[source] !== undefined) mapped[target] = row[source];
-        }
-
-        const sku = extractField(mapped, 'sku', 'part_number', 'partnumber', 'item_code');
-        const name = extractField(mapped, 'name', 'product_name', 'description', 'item_description');
-
-        if (!sku || !name) {
-          errors.push(`Row missing SKU or name: ${JSON.stringify(row)}`);
-          continue;
-        }
-
-        // Extract countries
-        const countriesRaw = extractField(mapped, 'countries', 'regions', 'country', 'region');
-        const countries = countriesRaw
-          ? countriesRaw.split(/[,;|]+/).map((c) => c.trim()).filter(Boolean)
-          : [];
-
-        // Extract family
-        const family = extractField(mapped, 'family', 'category', 'product_family', 'product_category');
-
-        // Build specifications from remaining columns
-        const knownFields = new Set(['sku', 'part_number', 'name', 'product_name', 'description',
-          'item_description', 'family', 'category', 'countries', 'regions', 'country', 'region',
-          'product_family', 'product_category', 'item_code', 'partnumber']);
-
-        const specifications: Record<string, unknown> = {};
-        for (const [key, val] of Object.entries(mapped)) {
-          if (!knownFields.has(key) && val !== null && val !== undefined && val !== '') {
-            specifications[key] = val;
-          }
-        }
-
-        // Fetch existing product
-        const { data: existing } = await adminSupabase
-          .from('products')
-          .select('*')
-          .eq('sku', sku)
-          .single();
-
-        const productData = {
-          sku,
-          name,
-          description: extractField(mapped, 'description', 'item_description') ?? null,
-          family: family ?? null,
-          specifications: Object.keys(specifications).length > 0 ? specifications : null,
-          countries: countries.length > 0 ? countries : null,
-          updated_at: new Date().toISOString(),
-        };
-
-        const { data: product, error: upsertError } = await adminSupabase
-          .from('products')
-          .upsert(productData, { onConflict: 'sku' })
-          .select()
-          .single();
-
-        if (upsertError || !product) {
-          errors.push(`Failed to upsert ${sku}: ${upsertError?.message}`);
-          continue;
-        }
-
-        upserted++;
-
-        // Check if re-embedding is needed
-        const embeddingText = buildProductEmbeddingText(product);
-        const hash = contentHash(embeddingText);
-
-        const { data: existingEmbed } = await adminSupabase
-          .from('product_embeddings')
-          .select('id, content_hash')
-          .eq('product_id', product.id)
-          .single();
-
-        const needsReembed = !existingEmbed || existingEmbed.content_hash !== hash ||
-          !existing || existing.name !== name || existing.description !== productData.description;
-
-        if (needsReembed) {
-          const embedding = await embedText(embeddingText);
-          const embeddingStr = `[${embedding.join(',')}]`;
-
-          if (existingEmbed) {
-            await adminSupabase
-              .from('product_embeddings')
-              .update({ embedding: embeddingStr, embedded_text: embeddingText, content_hash: hash })
-              .eq('id', existingEmbed.id);
-          } else {
-            await adminSupabase.from('product_embeddings').insert({
-              product_id: product.id,
-              embedding: embeddingStr,
-              embedded_text: embeddingText,
-              content_hash: hash,
-            });
-          }
-          reembedded++;
-        }
-      } catch (rowErr) {
-        errors.push(`Row error: ${rowErr instanceof Error ? rowErr.message : String(rowErr)}`);
+      const mapped: Record<string, unknown> = { ...row };
+      for (const [target, source] of Object.entries(mapping)) {
+        if (row[source] !== undefined) mapped[target] = row[source];
       }
+
+      const sku = extractField(mapped, 'sku', 'part_number', 'partnumber', 'item_code');
+      const name = extractField(mapped, 'name', 'product_name', 'description', 'item_description');
+
+      if (!sku || !name) {
+        errors.push(`Skipped row — missing SKU or name: ${JSON.stringify(row).slice(0, 120)}`);
+        continue;
+      }
+
+      const countriesRaw = extractField(mapped, 'countries', 'regions', 'country', 'region');
+      const countries = countriesRaw
+        ? countriesRaw.split(/[,;|]+/).map((c) => c.trim()).filter(Boolean)
+        : null;
+
+      const family = extractField(mapped, 'family', 'category', 'product_family', 'product_category');
+
+      const specifications: Record<string, unknown> = {};
+      for (const [key, val] of Object.entries(mapped)) {
+        if (!knownFields.has(key) && val !== null && val !== undefined && val !== '') {
+          specifications[key] = val;
+        }
+      }
+
+      products.push({
+        sku,
+        name,
+        description: extractField(mapped, 'description', 'item_description') ?? null,
+        family: family ?? null,
+        specifications: Object.keys(specifications).length > 0 ? specifications : null,
+        countries,
+        is_active: true,
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    if (products.length === 0) {
+      return NextResponse.json({ error: 'No valid rows found. Check column mapping.' }, { status: 400 });
+    }
+
+    // Upsert in batches of 500 to avoid Supabase payload limits
+    const adminSupabase = createAdminSupabaseClient();
+    const BATCH_SIZE = 500;
+    let upserted = 0;
+
+    for (let i = 0; i < products.length; i += BATCH_SIZE) {
+      const batch = products.slice(i, i + BATCH_SIZE);
+      const { error: upsertError } = await adminSupabase
+        .from('products')
+        .upsert(batch, { onConflict: 'sku' });
+
+      if (upsertError) {
+        return NextResponse.json(
+          { error: `DB upsert failed at batch ${Math.floor(i / BATCH_SIZE) + 1}: ${upsertError.message}` },
+          { status: 500 }
+        );
+      }
+      upserted += batch.length;
     }
 
     return NextResponse.json({
       success: true,
-      total_rows: rows.length,
+      total_rows: rawRows.length,
       upserted,
-      reembedded,
+      skipped: rawRows.length - upserted,
       errors: errors.slice(0, 20),
+      embeddingRequired: true,
+      message: `${upserted} products saved. Run "Generate Embeddings" to make them searchable.`,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error('SAP import error:', message);
+    const stack = err instanceof Error ? err.stack : '';
+    console.error('[SAP Import Error]', message, stack);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
-// Return headers for column mapping UI.
-// Called via POST with ?headers=1 — GET requests cannot carry a body.
 export async function GET() {
   return NextResponse.json({ error: 'Use POST ?headers=1 to fetch headers' }, { status: 405 });
 }
