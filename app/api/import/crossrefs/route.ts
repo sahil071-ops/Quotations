@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabaseClient } from '@/lib/supabase';
-import * as XLSX from 'xlsx';
 
 function normalizeKey(key: string): string {
   return key.toLowerCase().replace(/[\s_-]+/g, '_').trim();
@@ -8,6 +7,7 @@ function normalizeKey(key: string): string {
 
 export async function POST(req: NextRequest) {
   try {
+    const XLSX = await import('xlsx');
     const formData = await req.formData();
     const file = formData.get('file') as File | null;
 
