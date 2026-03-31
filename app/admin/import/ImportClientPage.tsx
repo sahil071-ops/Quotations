@@ -202,7 +202,7 @@ export default function ImportClientPage() {
 
       <ImportPanel
         title="Competitor Cross-Reference Import"
-        description="Import competitor part number mappings (Excel). Expected columns: Competitor Name, Competitor SKU, Axis SKU, Confidence, Notes."
+        description="Accepted formats: (1) Horizontal — first column header = AXIS, remaining headers = competitor names (EXAR, CABAC, etc.), each row maps one Axis SKU to its equivalents. (2) Vertical — columns named competitor_name, competitor_sku, axis_sku."
         endpoint="/api/import/crossrefs"
         accept=".xlsx,.xls,.csv"
       />
