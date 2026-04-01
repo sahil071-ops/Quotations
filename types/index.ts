@@ -94,6 +94,13 @@ export interface QueryMatchResponse {
   matches: MatchResult[];
 }
 
+export interface ClarificationQuestion {
+  id: string;
+  question: string;
+  type: 'select';
+  options: string[];
+}
+
 export interface ApiError {
   error: string;
 }

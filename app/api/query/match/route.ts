@@ -7,19 +7,28 @@ import type { MatchResult, QueryMatchResponse } from '@/types';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { query, country, engineer_id } = body as {
+    const { query, country, engineer_id, clarificationAnswers } = body as {
       query: string;
       country?: string;
       engineer_id: string;
+      clarificationAnswers?: Record<string, string>;
     };
 
     if (!query) {
       return NextResponse.json({ error: 'query is required' }, { status: 400 });
     }
 
+    // Build enriched query by appending clarification answers (skip "Not sure")
+    const enrichedQuery =
+      clarificationAnswers && Object.keys(clarificationAnswers).length > 0
+        ? `${query} ${Object.values(clarificationAnswers)
+            .filter((v) => v && v !== 'Not sure')
+            .join(' ')}`.trim()
+        : query;
+
     const adminSupabase = createAdminSupabaseClient();
 
-    // 1. Detect language
+    // 1. Detect language (uses original query, not enriched)
     let detectedLanguage = 'Unknown';
     try {
       detectedLanguage = await detectLanguage(query);
@@ -43,8 +52,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3. Embed the query
-    const queryEmbedding = await embedText(query);
+    // 3. Embed the enriched query
+    const queryEmbedding = await embedText(enrichedQuery);
     const embeddingStr = `[${queryEmbedding.join(',')}]`;
 
     // 4. Check feedback table for similar past corrections
@@ -58,10 +67,10 @@ export async function POST(req: NextRequest) {
       (f: { correct_sku: string }) => f.correct_sku
     ) ?? [];
 
-    // 5. Vector search
+    // 5. Vector search — fetch more candidates so country re-ranking has room to work
     const { data: vectorResults, error: searchError } = await adminSupabase.rpc('match_products', {
       query_embedding: embeddingStr,
-      match_count: 10,
+      match_count: 30,
     });
 
     if (searchError) {
@@ -80,14 +89,13 @@ export async function POST(req: NextRequest) {
       return a.distance - b.distance;
     });
 
-    // 7. Ask Claude to rank and reason
+    // 7. Ask Claude to rank and reason (pass top 20 candidates)
     let claudeMatches: Array<{ sku: string; confidence: string; reasoning: string }> = [];
     try {
-      claudeMatches = await rankProductMatches(query, country ?? '', candidates.slice(0, 10));
+      claudeMatches = await rankProductMatches(enrichedQuery, country ?? '', candidates.slice(0, 20));
     } catch (err) {
       console.error('Claude ranking failed:', err);
-      // Fall back to pure vector results
-      claudeMatches = candidates.slice(0, 3).map((c: { sku: string }, i: number) => ({
+      claudeMatches = candidates.slice(0, 10).map((c: { sku: string }, i: number) => ({
         sku: c.sku,
         confidence: i === 0 ? 'medium' : 'low',
         reasoning: 'AI reasoning unavailable — based on semantic similarity',
@@ -140,6 +148,9 @@ export async function POST(req: NextRequest) {
       matches.sort((a, b) => countryTier(a.sku) - countryTier(b.sku));
       matches = matches.map((m, i) => ({ ...m, rank: i + 1 }));
     }
+
+    // Trim to top 10
+    matches = matches.slice(0, 10);
 
     // 10. Log query
     const { data: queryLog } = await adminSupabase

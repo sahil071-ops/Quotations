@@ -21,7 +21,7 @@ export default function MatchList({ matches, onApprove, onCorrect, approvedSku, 
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+    <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
       {matches.map((match) => (
         <MatchCard
           key={match.sku}

@@ -1,6 +1,7 @@
 'use client';
 
-import { CheckCircle, XCircle } from 'lucide-react';
+import { useState } from 'react';
+import { CheckCircle, XCircle, ChevronDown } from 'lucide-react';
 import type { MatchResult } from '@/types';
 
 interface MatchCardProps {
@@ -19,81 +20,99 @@ const CONFIDENCE_STYLES = {
 
 const RANK_STYLES = [
   'bg-blue-900 text-white',
-  'bg-gray-700 text-white',
-  'bg-gray-500 text-white',
+  'bg-gray-600 text-white',
+  'bg-gray-400 text-white',
 ];
 
 export default function MatchCard({ match, onApprove, onCorrect, approved, disabled }: MatchCardProps) {
-  const rankIdx = Math.min(match.rank - 1, 2);
-  const topSpecs = match.specifications
-    ? Object.entries(match.specifications).slice(0, 3)
-    : [];
+  const [expanded, setExpanded] = useState(match.rank === 1);
+
+  const rankIdx = Math.min(match.rank - 1, RANK_STYLES.length - 1);
+  const topSpecs = match.specifications ? Object.entries(match.specifications).slice(0, 5) : [];
 
   return (
-    <div className={`rounded-lg border-2 bg-white p-5 shadow-sm transition-all ${approved ? 'border-green-400' : 'border-gray-200'}`}>
-      {/* Header */}
-      <div className="mb-3 flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${RANK_STYLES[rankIdx]}`}>
-            {match.rank}
+    <div className={`border-b last:border-b-0 border-gray-100 ${approved ? 'bg-green-50' : ''}`}>
+      {/* Collapsed row — always visible */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setExpanded((e) => !e)}
+        onKeyDown={(ev) => ev.key === 'Enter' && setExpanded((e) => !e)}
+        className="flex cursor-pointer items-center gap-3 px-4 py-3 hover:bg-gray-50 focus:outline-none focus-visible:bg-gray-50"
+      >
+        <span
+          className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${RANK_STYLES[rankIdx]}`}
+        >
+          {match.rank}
+        </span>
+
+        <span className="w-32 shrink-0 truncate font-mono text-sm font-bold text-blue-900">
+          {match.sku}
+        </span>
+
+        <span className="min-w-0 flex-1 truncate text-sm text-gray-800">{match.name}</span>
+
+        {match.family && (
+          <span className="hidden shrink-0 rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600 sm:block">
+            {match.family}
           </span>
-          <span className={`inline-flex items-center rounded border px-2 py-0.5 text-xs font-medium capitalize ${CONFIDENCE_STYLES[match.confidence]}`}>
-            {match.confidence}
-          </span>
-        </div>
-        {approved && (
-          <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700">
-            <CheckCircle className="h-4 w-4" /> Approved
-          </span>
+        )}
+
+        <span
+          className={`shrink-0 rounded border px-2 py-0.5 text-xs font-medium capitalize ${CONFIDENCE_STYLES[match.confidence]}`}
+        >
+          {match.confidence}
+        </span>
+
+        {approved ? (
+          <CheckCircle className="h-4 w-4 shrink-0 text-green-600" />
+        ) : (
+          <ChevronDown
+            className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
+          />
         )}
       </div>
 
-      {/* SKU */}
-      <div className="mb-1 font-mono text-lg font-bold text-blue-900">{match.sku}</div>
+      {/* Expanded panel */}
+      {expanded && (
+        <div className="border-t border-gray-100 bg-gray-50 px-4 pb-4 pt-3">
+          {match.description && (
+            <p className="mb-3 text-sm text-gray-700">{match.description}</p>
+          )}
 
-      {/* Name */}
-      <div className="mb-1 text-sm font-semibold text-gray-900">{match.name}</div>
-
-      {/* Family */}
-      {match.family && (
-        <div className="mb-2 inline-block rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
-          {match.family}
-        </div>
-      )}
-
-      {/* Key Specs */}
-      {topSpecs.length > 0 && (
-        <div className="mb-2 space-y-0.5">
-          {topSpecs.map(([key, val]) => (
-            <div key={key} className="text-xs text-gray-600">
-              <span className="font-medium text-gray-700">{key}:</span> {String(val)}
+          {topSpecs.length > 0 && (
+            <div className="mb-3 grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3">
+              {topSpecs.map(([key, val]) => (
+                <div key={key} className="text-xs">
+                  <span className="font-medium text-gray-600">{key}:</span>{' '}
+                  <span className="text-gray-800">{String(val)}</span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      )}
+          )}
 
-      {/* Reasoning */}
-      <p className="mb-4 text-xs italic text-gray-500">&ldquo;{match.reasoning}&rdquo;</p>
+          <p className="mb-3 text-xs italic text-gray-500">&ldquo;{match.reasoning}&rdquo;</p>
 
-      {/* Actions */}
-      {!approved && (
-        <div className="flex gap-2">
-          <button
-            onClick={() => onApprove(match)}
-            disabled={disabled}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
-          >
-            <CheckCircle className="h-3.5 w-3.5" />
-            This is correct
-          </button>
-          <button
-            onClick={() => onCorrect(match)}
-            disabled={disabled}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
-          >
-            <XCircle className="h-3.5 w-3.5" />
-            Wrong — correct it
-          </button>
+          {!approved && (
+            <div className="flex gap-2">
+              <button
+                onClick={(e) => { e.stopPropagation(); onApprove(match); }}
+                disabled={disabled}
+                className="flex items-center gap-1.5 rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
+              >
+                <CheckCircle className="h-3.5 w-3.5" />
+                This is correct
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); onCorrect(match); }}
+                disabled={disabled}
+                className="flex items-center gap-1.5 rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+              >
+                <XCircle className="h-3.5 w-3.5" />
+                Wrong — correct it
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
