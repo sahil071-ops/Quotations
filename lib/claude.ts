@@ -20,16 +20,17 @@ export async function classifyQuery(query: string): Promise<'specific' | 'generi
     const message = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 100,
-      system: `Classify product search queries for an electrical hardware manufacturer.
+      temperature: 0,
+      system: `You are classifying product search queries for Axis Electricals, an electrical hardware manufacturer.
+They make: earth rods, cable glands, cable lugs, termination kits, lightning protection, U-bolts, clamps, connectors.
 
-SPECIFIC: contains dimensions, sizes, materials, part numbers, competitor SKUs, quantities,
-standards (IEC, BS EN, UL), installation context, or 2+ descriptive terms.
-Examples: "17.2mm copper earth rod 3000mm", "EXAR EXAT 1.5/4", "cable gland M25 brass IP68"
+Classify as GENERIC if the query is ONLY a product type name or category with no additional detail.
+Classify as SPECIFIC if the query has ANY additional detail (size, material, standard, quantity, part number, competitor reference, 2+ descriptive words).
 
-GENERIC: just a product type or category with no additional detail.
-Examples: "earth rod", "u bolt", "cable gland", "termination kit"
+GENERIC examples: "earth rod", "u bolt", "cable gland", "termination kit", "lugs", "earth rod assembly", "cable lug", "copper rod"
+SPECIFIC examples: "17.2mm copper earth rod 3000mm", "M25 brass cable gland IP68", "EXAR EXAT 1.5/4", "copper lug 70mm2", "earth rod 1200mm"
 
-Respond with JSON only: {"mode": "specific"} or {"mode": "generic"}`,
+Respond with JSON only, no explanation: {"mode": "generic"} or {"mode": "specific"}`,
       messages: [{ role: 'user', content: `Query: "${query}"` }],
     });
 
@@ -52,6 +53,7 @@ export async function generateClarifications(
     const message = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 400,
+      temperature: 0,
       system: `You are helping an engineer find the right electrical hardware product.
 Generate exactly 2-3 clarifying questions that narrow down to the right product.
 Questions should address the MOST DIFFERENTIATING attributes visible in the product names.
@@ -121,6 +123,7 @@ Return ONLY a JSON array with no preamble or markdown. Format:
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
     max_tokens: 2048,
+    temperature: 0,
     system: systemPrompt,
     messages: [{ role: 'user', content: userMessage }],
   });
@@ -136,6 +139,7 @@ export async function detectLanguage(text: string): Promise<string> {
   const message = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 50,
+    temperature: 0,
     system: 'Detect the language of the input text. Return only the language name in English (e.g., "English", "Spanish", "Arabic"). Nothing else.',
     messages: [{ role: 'user', content: text.slice(0, 500) }],
   });

@@ -90,16 +90,28 @@ export async function POST(req: NextRequest) {
     });
 
     // 7. Ask Claude to rank and reason (pass top 20 candidates)
+    const MAX_RESULTS = 10;
     let claudeMatches: Array<{ sku: string; confidence: string; reasoning: string }> = [];
     try {
       claudeMatches = await rankProductMatches(enrichedQuery, country ?? '', candidates.slice(0, 20));
     } catch (err) {
       console.error('Claude ranking failed:', err);
-      claudeMatches = candidates.slice(0, 10).map((c: { sku: string }, i: number) => ({
+      claudeMatches = candidates.slice(0, MAX_RESULTS).map((c: { sku: string }, i: number) => ({
         sku: c.sku,
         confidence: i === 0 ? 'medium' : 'low',
         reasoning: 'AI reasoning unavailable — based on semantic similarity',
       }));
+    }
+
+    // 7b. Pad to MAX_RESULTS with remaining vector candidates if Claude returned fewer
+    if (claudeMatches.length < MAX_RESULTS) {
+      const claudeSkus = new Set(claudeMatches.map((m) => m.sku));
+      const padding = (candidates as Array<{ sku: string }>)
+        .filter((c) => !claudeSkus.has(c.sku))
+        .slice(0, MAX_RESULTS - claudeMatches.length);
+      for (const c of padding) {
+        claudeMatches.push({ sku: c.sku, confidence: 'low', reasoning: 'Additional match based on semantic similarity' });
+      }
     }
 
     // 8. Override reasoning for feedback-boosted results
@@ -149,8 +161,8 @@ export async function POST(req: NextRequest) {
       matches = matches.map((m, i) => ({ ...m, rank: i + 1 }));
     }
 
-    // Trim to top 10
-    matches = matches.slice(0, 10);
+    // Trim to MAX_RESULTS
+    matches = matches.slice(0, MAX_RESULTS);
 
     // 10. Log query
     const { data: queryLog } = await adminSupabase
