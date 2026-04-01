@@ -83,7 +83,7 @@ export default function CrossrefsClientPage() {
       const res = await fetch('/api/import/crossrefs', { method: 'POST', body: fd });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Import failed');
-      toast.success(`Imported ${data.upserted} cross-references`);
+      toast.success(data.message ?? `Imported ${data.imported ?? data.total} cross-references`);
       setImportFile(null);
       fetchData();
     } catch (err) {
@@ -183,6 +183,11 @@ export default function CrossrefsClientPage() {
           </form>
         </div>
       )}
+
+      {/* Many-to-many note */}
+      <p className="mb-3 text-xs text-gray-400">
+        One competitor SKU may map to multiple Axis SKUs — each mapping is a separate row. This is expected.
+      </p>
 
       {/* Table */}
       {loading ? (

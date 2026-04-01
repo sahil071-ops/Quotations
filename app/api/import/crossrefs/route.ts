@@ -40,7 +40,13 @@ export async function POST(req: NextRequest) {
       confidence: string;
     };
 
-    const crossrefs: CrossRef[] = [];
+    // Use a Map keyed by triplet to deduplicate within the file itself
+    const crossrefMap = new Map<string, CrossRef>();
+
+    const addCrossref = (ref: CrossRef) => {
+      const key = `${ref.competitor_name}|${ref.competitor_sku}|${ref.axis_sku}`;
+      crossrefMap.set(key, ref);
+    };
 
     // ── HORIZONTAL FORMAT ──────────────────────────────────────────────────
     // First cell is "AXIS" — remaining header cells are competitor names.
@@ -57,7 +63,7 @@ export async function POST(req: NextRequest) {
           const competitorSku = String(row[c + 1] ?? '').trim();
           if (!competitorSku) continue; // no equivalent for this competitor
 
-          crossrefs.push({
+          addCrossref({
             competitor_name: competitorNames[c],
             competitor_sku: competitorSku,
             axis_sku: axisSku,
@@ -97,9 +103,11 @@ export async function POST(req: NextRequest) {
 
         if (!competitorName || !competitorSku || !axisSku) continue;
 
-        crossrefs.push({ competitor_name: competitorName, competitor_sku: competitorSku, axis_sku: axisSku, confidence });
+        addCrossref({ competitor_name: competitorName, competitor_sku: competitorSku, axis_sku: axisSku, confidence });
       }
     }
+
+    const crossrefs = Array.from(crossrefMap.values());
 
     if (crossrefs.length === 0) {
       return NextResponse.json({
@@ -117,7 +125,7 @@ export async function POST(req: NextRequest) {
       const batch = crossrefs.slice(i, i + BATCH_SIZE);
       const { error } = await adminSupabase
         .from('competitor_crossrefs')
-        .upsert(batch, { onConflict: 'competitor_name,competitor_sku' });
+        .upsert(batch, { onConflict: 'competitor_name,competitor_sku,axis_sku' });
 
       if (error) {
         errors.push(`Batch ${Math.floor(i / BATCH_SIZE) + 1}: ${error.message}`);
