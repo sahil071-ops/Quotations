@@ -54,26 +54,36 @@ export async function generateClarifications(
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 400,
       temperature: 0,
-      system: `You are helping an engineer find the right electrical hardware product.
-Generate exactly 2-3 clarifying questions that narrow down to the right product.
-Questions should address the MOST DIFFERENTIATING attributes visible in the product names.
-Do NOT ask about quantity, price, or delivery. Keep questions short and specific.
-Respond with JSON only — no markdown fences.`,
       messages: [{
         role: 'user',
-        content: `Engineer searched for: "${query}"
+        content: `You are helping an engineer at Axis Electricals find the exact right product SKU.
 
-Product variants in catalog:
+The engineer searched for: "${query}"
+
+These product variants exist in the catalog for this product type:
 ${sampleText}
 
-Return JSON: {"questions": [{"id": "q1", "question": "...", "type": "select", "options": ["...", "Not sure"]}]}`,
+Step 1: Identify which attributes are ALREADY specified in the engineer's query (e.g. material, diameter, length, thread type, end finish, plate type, standard, bolt material).
+
+Step 2: Identify which attributes are still AMBIGUOUS — meaning the catalog has multiple different options for that attribute and the query does not specify it.
+
+Step 3: Generate clarifying questions ONLY for ambiguous attributes. Maximum 3 questions. If fewer than 3 attributes are ambiguous, generate fewer questions. If all key attributes are already specified, return an empty questions array.
+
+Rules:
+- Only ask about attributes visible in the product names above
+- Keep question labels short (under 6 words)
+- Always include "Not sure" as the last option
+- Never ask about price, quantity, or delivery
+
+Respond with JSON only, no explanation:
+{"specifiedAttributes": ["material: copper"], "questions": [{"id": "q1", "question": "Length?", "type": "select", "options": ["1200mm", "3000mm", "Not sure"]}]}`,
       }],
     });
 
     const content = message.content[0];
     if (content.type !== 'text') return [];
     const clean = content.text.trim().replace(/```json|```/g, '').trim();
-    const result = JSON.parse(clean) as { questions: ClarificationQuestion[] };
+    const result = JSON.parse(clean) as { questions: ClarificationQuestion[]; specifiedAttributes?: string[] };
     return result.questions ?? [];
   } catch {
     return [];

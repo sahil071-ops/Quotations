@@ -10,7 +10,7 @@ import ClarificationPanel from '@/components/ClarificationPanel';
 import { SkeletonCardList } from '@/components/SkeletonCard';
 import type { QueryMatchResponse, MatchResult, ClarificationQuestion } from '@/types';
 
-type Phase = 'idle' | 'classifying' | 'clarifying' | 'searching' | 'done';
+type Phase = 'idle' | 'clarifying' | 'searching' | 'done';
 
 interface QueryPageClientProps {
   engineerId: string;
@@ -61,7 +61,7 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
   };
 
   const handleQuery = async (query: string, country: string) => {
-    setPhase('classifying');
+    setPhase('clarifying');
     setPendingQuery(query);
     setPendingCountry(country);
     setResult(null);
@@ -70,38 +70,24 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
     setClarifyQuestions([]);
 
     try {
-      const classRes = await fetch('/api/query/classify', {
+      const clarifyRes = await fetch('/api/query/clarify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query }),
       });
-      const classData = await classRes.json();
-      console.log('[CLASSIFY]', query, '->', classData.mode);
+      const clarifyData = await clarifyRes.json();
+      const questions: ClarificationQuestion[] = clarifyData.questions ?? [];
 
-      if (classData.mode === 'generic') {
-        // Try to get clarification questions
-        try {
-          const clarifyRes = await fetch('/api/query/clarify', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query }),
-          });
-          const clarifyData = await clarifyRes.json();
-
-          if (!clarifyData.fallbackToSearch && clarifyData.questions?.length > 0) {
-            setClarifyQuestions(clarifyData.questions);
-            setPhase('clarifying');
-            return;
-          }
-        } catch {
-          // Clarify failed — fall through to direct search
-        }
+      if (questions.length > 0) {
+        setClarifyQuestions(questions);
+        // Stay in 'clarifying' phase — ClarificationPanel renders below
+        return;
       }
 
-      // Specific mode (or generic fallback)
+      // No questions needed — search directly
       await runSearch(query, country, {});
     } catch {
-      // Classify failed — fall through to direct search
+      // Clarify failed — search directly
       await runSearch(query, country, {});
     }
   };
@@ -160,7 +146,11 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
     }
   };
 
-  const isLoadingQuery = phase === 'classifying' || phase === 'searching';
+  // Disable the query form while a search is in progress or while waiting
+  // for the clarify response (questions not yet loaded)
+  const isLoadingQuery =
+    phase === 'searching' ||
+    (phase === 'clarifying' && clarifyQuestions.length === 0);
 
   return (
     <div className="space-y-6">
@@ -169,11 +159,11 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
         <QueryBox onSubmit={handleQuery} isLoading={isLoadingQuery} />
       </div>
 
-      {/* Classifying indicator */}
-      {phase === 'classifying' && (
+      {/* Clarify in-flight spinner */}
+      {phase === 'clarifying' && clarifyQuestions.length === 0 && (
         <div className="flex items-center gap-2 text-sm text-gray-500">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Analysing query…
+          Checking catalog…
         </div>
       )}
 
