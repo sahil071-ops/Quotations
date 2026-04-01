@@ -9,12 +9,12 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { query, country, engineer_id } = body as {
       query: string;
-      country: string;
+      country?: string;
       engineer_id: string;
     };
 
-    if (!query || !country) {
-      return NextResponse.json({ error: 'query and country are required' }, { status: 400 });
+    if (!query) {
+      return NextResponse.json({ error: 'query is required' }, { status: 400 });
     }
 
     const adminSupabase = createAdminSupabaseClient();
@@ -61,7 +61,6 @@ export async function POST(req: NextRequest) {
     // 5. Vector search
     const { data: vectorResults, error: searchError } = await adminSupabase.rpc('match_products', {
       query_embedding: embeddingStr,
-      country_filter: country,
       match_count: 10,
     });
 
@@ -84,7 +83,7 @@ export async function POST(req: NextRequest) {
     // 7. Ask Claude to rank and reason
     let claudeMatches: Array<{ sku: string; confidence: string; reasoning: string }> = [];
     try {
-      claudeMatches = await rankProductMatches(query, country, candidates.slice(0, 10));
+      claudeMatches = await rankProductMatches(query, country ?? '', candidates.slice(0, 10));
     } catch (err) {
       console.error('Claude ranking failed:', err);
       // Fall back to pure vector results
@@ -112,7 +111,7 @@ export async function POST(req: NextRequest) {
 
     const productMap = Object.fromEntries((products ?? []).map((p) => [p.sku, p]));
 
-    const matches: MatchResult[] = claudeMatches.map((m, i) => {
+    let matches: MatchResult[] = claudeMatches.map((m, i) => {
       const product = productMap[m.sku];
       return {
         rank: i + 1,
@@ -126,6 +125,22 @@ export async function POST(req: NextRequest) {
       };
     });
 
+    // 9b. Country tier re-ranking (only when a country is provided)
+    // Tier 0: country is in product.countries  →  shows first
+    // Tier 1: product.countries is empty/null   →  shows second
+    // Tier 2: product.countries is set but doesn't include country → shows last
+    if (country) {
+      const countryTier = (sku: string): number => {
+        const prod = productMap[sku];
+        const countries = prod?.countries;
+        if (!countries || countries.length === 0) return 1;
+        if (countries.includes(country)) return 0;
+        return 2;
+      };
+      matches.sort((a, b) => countryTier(a.sku) - countryTier(b.sku));
+      matches = matches.map((m, i) => ({ ...m, rank: i + 1 }));
+    }
+
     // 10. Log query
     const { data: queryLog } = await adminSupabase
       .from('queries')
@@ -133,7 +148,7 @@ export async function POST(req: NextRequest) {
         engineer_id: engineer_id ?? null,
         raw_query: query,
         detected_language: detectedLanguage,
-        country_context: country,
+        country_context: country ?? null,
         top_matches: matches,
       })
       .select('id')

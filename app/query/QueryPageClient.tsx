@@ -16,6 +16,7 @@ interface QueryPageClientProps {
 export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<QueryMatchResponse | null>(null);
+  const [lastCountry, setLastCountry] = useState('');
   const [approvedSku, setApprovedSku] = useState<string | null>(null);
   const [feedbackModal, setFeedbackModal] = useState<{ open: boolean; match: MatchResult | null }>({
     open: false,
@@ -27,6 +28,7 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
     setLoading(true);
     setResult(null);
     setApprovedSku(null);
+    setLastCountry(country);
 
     try {
       const res = await fetch('/api/query/match', {
@@ -117,6 +119,12 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
           <div className="flex items-center gap-3 text-xs text-gray-500">
             <Globe className="h-3.5 w-3.5" />
             <span>Detected language: <strong>{result.detected_language}</strong></span>
+            {lastCountry && (
+              <>
+                <span className="text-gray-300">|</span>
+                <span>Region: <strong>{lastCountry}</strong></span>
+              </>
+            )}
             <span className="text-gray-300">|</span>
             <span>{result.matches.length} matches found</span>
           </div>

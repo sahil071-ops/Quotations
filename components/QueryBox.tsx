@@ -15,7 +15,7 @@ export default function QueryBox({ onSubmit, isLoading }: QueryBoxProps) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!query.trim() || !country) return;
+    if (!query.trim()) return;
     onSubmit(query.trim(), country);
   };
 
@@ -38,14 +38,14 @@ export default function QueryBox({ onSubmit, isLoading }: QueryBoxProps) {
       <div className="flex items-end gap-3">
         <div className="flex-1">
           <label className="mb-1.5 block text-sm font-medium text-gray-700">
-            Region <span className="text-red-500">*</span>
+            Region <span className="text-gray-400 font-normal text-xs">(optional)</span>
           </label>
           <CountrySelector value={country} onChange={setCountry} disabled={isLoading} />
         </div>
 
         <button
           type="submit"
-          disabled={!query.trim() || !country || isLoading}
+          disabled={!query.trim() || isLoading}
           className="flex items-center gap-2 rounded-md bg-blue-900 px-5 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isLoading ? (
