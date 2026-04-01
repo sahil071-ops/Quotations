@@ -76,6 +76,7 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
         body: JSON.stringify({ query }),
       });
       const classData = await classRes.json();
+      console.log('[CLASSIFY]', query, '->', classData.mode);
 
       if (classData.mode === 'generic') {
         // Try to get clarification questions

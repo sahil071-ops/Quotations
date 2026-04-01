@@ -38,37 +38,37 @@ export default function MatchCard({ match, onApprove, onCorrect, approved, disab
         tabIndex={0}
         onClick={() => setExpanded((e) => !e)}
         onKeyDown={(ev) => ev.key === 'Enter' && setExpanded((e) => !e)}
-        className="flex cursor-pointer items-center gap-3 px-4 py-3 hover:bg-gray-50 focus:outline-none focus-visible:bg-gray-50"
+        className="flex cursor-pointer items-start gap-3 px-4 py-3 hover:bg-gray-50 focus:outline-none focus-visible:bg-gray-50"
       >
         <span
-          className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${RANK_STYLES[rankIdx]}`}
+          className={`mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${RANK_STYLES[rankIdx]}`}
         >
           {match.rank}
         </span>
 
-        <span className="w-32 shrink-0 truncate font-mono text-sm font-bold text-blue-900">
+        <span className="mt-0.5 w-32 shrink-0 font-mono text-sm font-bold text-blue-900">
           {match.sku}
         </span>
 
-        <span className="min-w-0 flex-1 truncate text-sm text-gray-800">{match.name}</span>
+        <span className="flex-1 text-sm text-gray-800">{match.name}</span>
 
         {match.family && (
-          <span className="hidden shrink-0 rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600 sm:block">
+          <span className="mt-0.5 hidden shrink-0 rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600 sm:block">
             {match.family}
           </span>
         )}
 
         <span
-          className={`shrink-0 rounded border px-2 py-0.5 text-xs font-medium capitalize ${CONFIDENCE_STYLES[match.confidence]}`}
+          className={`mt-0.5 shrink-0 rounded border px-2 py-0.5 text-xs font-medium capitalize ${CONFIDENCE_STYLES[match.confidence]}`}
         >
           {match.confidence}
         </span>
 
         {approved ? (
-          <CheckCircle className="h-4 w-4 shrink-0 text-green-600" />
+          <CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-green-600" />
         ) : (
           <ChevronDown
-            className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
+            className={`mt-0.5 h-4 w-4 shrink-0 text-gray-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
           />
         )}
       </div>
