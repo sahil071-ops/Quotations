@@ -18,7 +18,16 @@ export async function GET(req: NextRequest) {
       .range(offset, offset + pageSize - 1);
 
     if (q) {
-      query = query.or(`sku.ilike.%${q}%,name.ilike.%${q}%,family.ilike.%${q}%`);
+      // Normalise both forms: "2400mm" and "2400 mm" should match the same products
+      const normalised = q.replace(/(\d+)\s+(mm|cm|m|kg|a|v|w|kv|mv)\b/gi, '$1$2');
+      const spaced = q.replace(/(\d+)(mm|cm|m\b|kg\b|[avwk][mv]?\b)/gi, '$1 $2');
+      const terms = Array.from(new Set([q, normalised, spaced]));
+      const orClauses = terms.flatMap((t) => [
+        `sku.ilike.%${t}%`,
+        `name.ilike.%${t}%`,
+        `family.ilike.%${t}%`,
+      ]);
+      query = query.or(orClauses.join(','));
     }
 
     const { data, count, error } = await query;

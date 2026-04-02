@@ -101,7 +101,8 @@ export async function rankProductMatches(
     description?: string | null;
     family?: string | null;
     specifications?: Record<string, unknown> | null;
-  }>
+  }>,
+  originalQuery?: string
 ): Promise<ProductMatch[]> {
   const candidateList = candidates.map((c) => ({
     sku: c.sku,
@@ -114,6 +115,11 @@ export async function rankProductMatches(
     ? `Country context: ${country}. Prefer products available in this country.`
     : '';
 
+  const unitNote =
+    originalQuery && originalQuery !== query
+      ? `Note: The query has been enriched with metric unit conversions. Original query: "${originalQuery}". Enriched query: "${query}". When scoring, treat the metric values appended (e.g. 2438mm, 16mm) as specifications to match against product names.`
+      : '';
+
   const systemPrompt = `You are a product matching expert for Axis India, an industrial technology company.
 Rate each candidate product for relevance to the engineer's query.
 Return ONLY products with a relevance score of 60 or above — return ALL of them, even if that is 30+ products.
@@ -125,6 +131,7 @@ Scoring guide:
 - 60–69 (low): plausible match but missing key information
 - Below 60: omit entirely
 ${countryNote}
+${unitNote}
 
 The query may be in any language, use competitor part numbers, or informal descriptions.
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabaseClient } from '@/lib/supabase';
 import { embedText } from '@/lib/embeddings';
 import { rankProductMatches, detectLanguage } from '@/lib/claude';
+import { enrichQueryWithMetric } from '@/lib/units';
 import type { MatchResult, QueryMatchResponse } from '@/types';
 
 export async function POST(req: NextRequest) {
@@ -19,13 +20,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'query is required' }, { status: 400 });
     }
 
-    // Build enriched query — append clarification answers, skip non-values
-    const enrichedQuery =
+    // Convert any imperial units in the query to metric equivalents so the
+    // embedding model can match metric product names (e.g. "8 feet" → "8 feet 2438mm")
+    const queryWithUnits = enrichQueryWithMetric(query);
+
+    // Build enriched query — unit-converted base + clarification answers
+    const clarificationValues =
       clarificationAnswers && Object.keys(clarificationAnswers).length > 0
-        ? `${query} ${Object.values(clarificationAnswers)
-            .filter((v) => v && v !== 'Not sure' && v !== 'Other (please specify)')
-            .join(' ')}`.trim()
-        : query;
+        ? Object.values(clarificationAnswers).filter(
+            (v) => v && v !== 'Not sure' && v !== 'Other (please specify)'
+          )
+        : [];
+
+    const enrichedQuery =
+      clarificationValues.length > 0
+        ? `${queryWithUnits} ${clarificationValues.map(enrichQueryWithMetric).join(' ')}`.trim()
+        : queryWithUnits;
 
     const adminSupabase = createAdminSupabaseClient();
 
@@ -125,7 +135,7 @@ export async function POST(req: NextRequest) {
     // 8. Ask Claude to score candidates — returns all with score ≥ 60
     let claudeMatches: Array<{ sku: string; score: number; confidence: string; reasoning: string }> = [];
     try {
-      claudeMatches = await rankProductMatches(enrichedQuery, country ?? '', candidatesWithDetails);
+      claudeMatches = await rankProductMatches(enrichedQuery, country ?? '', candidatesWithDetails, query);
     } catch (err) {
       console.error('Claude ranking failed:', err);
       claudeMatches = candidates.slice(0, 10).map((c, i) => ({
