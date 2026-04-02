@@ -12,7 +12,7 @@ export async function GET() {
       .not('family', 'is', null)
       .eq('is_active', true);
 
-    const families = [...new Set((data ?? []).map((p: { family: string }) => p.family).filter(Boolean))].sort();
+    const families = Array.from(new Set((data ?? []).map((p: { family: string }) => p.family).filter(Boolean))).sort();
 
     return NextResponse.json({ families });
   } catch (err) {
