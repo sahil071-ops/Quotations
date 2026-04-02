@@ -100,10 +100,32 @@ export async function POST(req: NextRequest) {
       return a.distance - b.distance;
     });
 
-    // 7. Ask Claude to score candidates — returns all with score ≥ 60
+    // 7. Fetch full product details for all candidates (needed for Claude + final result)
+    const candidateSkus = candidates.map((c) => c.sku);
+    const { data: candidateProducts } = await adminSupabase
+      .from('products')
+      .select('*')
+      .in('sku', candidateSkus);
+
+    const productMap = Object.fromEntries((candidateProducts ?? []).map((p) => [p.sku, p]));
+
+    const candidatesWithDetails = candidates
+      .slice(0, 50)
+      .map((c) => {
+        const p = productMap[c.sku];
+        return {
+          sku: c.sku,
+          name: p?.name ?? c.sku,
+          description: p?.description ?? null,
+          family: p?.family ?? null,
+          specifications: p?.specifications ?? null,
+        };
+      });
+
+    // 8. Ask Claude to score candidates — returns all with score ≥ 60
     let claudeMatches: Array<{ sku: string; score: number; confidence: string; reasoning: string }> = [];
     try {
-      claudeMatches = await rankProductMatches(enrichedQuery, country ?? '', candidates.slice(0, 50));
+      claudeMatches = await rankProductMatches(enrichedQuery, country ?? '', candidatesWithDetails);
     } catch (err) {
       console.error('Claude ranking failed:', err);
       claudeMatches = candidates.slice(0, 10).map((c, i) => ({
@@ -124,22 +146,13 @@ export async function POST(req: NextRequest) {
       }));
     }
 
-    // 8. Override for feedback-boosted results
+    // 9. Override for feedback-boosted results
     claudeMatches = claudeMatches.map((m) => {
       if (feedbackBoostSkus.includes(m.sku)) {
         return { ...m, score: 100, confidence: 'high', reasoning: 'Based on previous engineer correction' };
       }
       return m;
     });
-
-    // 9. Fetch full product details
-    const topSkus = claudeMatches.map((m) => m.sku);
-    const { data: products } = await adminSupabase
-      .from('products')
-      .select('*')
-      .in('sku', topSkus);
-
-    const productMap = Object.fromEntries((products ?? []).map((p) => [p.sku, p]));
 
     let matches: MatchResult[] = claudeMatches.map((m, i) => {
       const product = productMap[m.sku];
