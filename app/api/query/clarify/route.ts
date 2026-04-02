@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
 
     const { data: products } = await dbQuery.limit(40);
 
-    const sampleNames = [...new Set((products ?? []).map((p: { name: string }) => p.name).filter(Boolean))];
+    const sampleNames = Array.from(new Set((products ?? []).map((p: { name: string }) => p.name).filter(Boolean)));
     const questions = await generateClarifications(query, sampleNames);
 
     if (questions.length === 0) {
