@@ -92,6 +92,43 @@ Respond with JSON only, no explanation:
   }
 }
 
+export async function generateVariantQuestions(
+  variantNames: string[]
+): Promise<ClarificationQuestion[]> {
+  try {
+    const message = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 500,
+      temperature: 0,
+      messages: [{
+        role: 'user',
+        content: `These are product variants from the same family. Identify what attributes ACTUALLY DIFFER between them and generate clarifying questions so an engineer can pick the right one.
+
+Products:
+${variantNames.join('\n')}
+
+Rules:
+- Only ask about attributes that differ between the products listed above
+- Extract the exact option values that exist in the names (do not invent options)
+- Maximum 3 questions
+- Always add "Not sure" as the last option
+- Keep question labels under 6 words
+
+Respond with JSON only:
+{"questions": [{"id": "q1", "question": "Thread type?", "type": "select", "options": ["Unthreaded", "Externally threaded", "Not sure"]}]}`,
+      }],
+    });
+
+    const content = message.content[0];
+    if (content.type !== 'text') return [];
+    const clean = content.text.trim().replace(/```json|```/g, '').trim();
+    const result = JSON.parse(clean) as { questions: ClarificationQuestion[] };
+    return result.questions ?? [];
+  } catch {
+    return [];
+  }
+}
+
 export async function rankProductMatches(
   query: string,
   country: string,

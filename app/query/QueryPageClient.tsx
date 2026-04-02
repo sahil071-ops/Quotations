@@ -10,7 +10,10 @@ import ClarificationPanel from '@/components/ClarificationPanel';
 import { SkeletonCardList } from '@/components/SkeletonCard';
 import type { QueryMatchResponse, MatchResult, ClarificationQuestion } from '@/types';
 
-type Phase = 'idle' | 'clarifying' | 'searching' | 'done';
+// Phase machine:
+// idle → searching → clarifying (if variant family detected) → searching → done
+//                  → done (if no clarification needed)
+type Phase = 'idle' | 'searching' | 'clarifying' | 'done';
 
 interface QueryPageClientProps {
   engineerId: string;
@@ -37,7 +40,6 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
   });
   const [submittingFeedback, setSubmittingFeedback] = useState(false);
 
-  // Load product families on mount
   useEffect(() => {
     fetch('/api/query/families')
       .then((r) => r.json())
@@ -45,46 +47,37 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
       .catch(() => {});
   }, []);
 
-  const runSearch = async (query: string, country: string, family: string, answers: Record<string, string>) => {
-    setPhase('searching');
-    try {
-      setSearchStatus('Understanding your query…');
-      await delay(300);
-      setSearchStatus('Searching product catalog…');
+  const callEndpoint = async (
+    query: string,
+    country: string,
+    family: string,
+    clarificationAnswers: Record<string, string>
+  ) => {
+    const res = await fetch('/api/query/search-then-clarify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query,
+        country: country || undefined,
+        family: family || undefined,
+        engineer_id: engineerId,
+        clarificationAnswers: Object.keys(clarificationAnswers).length > 0 ? clarificationAnswers : undefined,
+      }),
+    });
 
-      const res = await fetch('/api/query/match', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query,
-          country: country || undefined,
-          family: family || undefined,
-          engineer_id: engineerId,
-          clarificationAnswers: Object.keys(answers).length > 0 ? answers : undefined,
-        }),
-      });
-
-      setSearchStatus('Ranking matches…');
+    if (!res.ok) {
       const data = await res.json();
-      setSearchStatus('');
-
-      if (!res.ok) {
-        toast.error(data.error ?? 'Failed to fetch matches');
-        setPhase('idle');
-        return;
-      }
-
-      setResult(data as QueryMatchResponse);
-      setPhase('done');
-    } catch {
-      setSearchStatus('');
-      toast.error('Network error — please try again');
-      setPhase('idle');
+      throw new Error(data.error ?? 'Search failed');
     }
+
+    return res.json() as Promise<
+      | { mode: 'clarify'; questions: ClarificationQuestion[]; candidateCount: number }
+      | ({ mode: 'results' } & QueryMatchResponse)
+    >;
   };
 
   const handleQuery = async (query: string, country: string, family: string) => {
-    setPhase('clarifying');
+    setPhase('searching');
     setPendingQuery(query);
     setPendingCountry(country);
     setPendingFamily(family);
@@ -94,27 +87,74 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
     setClarifyQuestions([]);
 
     try {
-      const clarifyRes = await fetch('/api/query/clarify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, family: family || undefined }),
-      });
-      const clarifyData = await clarifyRes.json();
-      const questions: ClarificationQuestion[] = clarifyData.questions ?? [];
+      setSearchStatus('Searching product catalog…');
+      await delay(300);
 
-      if (questions.length > 0) {
-        setClarifyQuestions(questions);
-        return; // stay in 'clarifying' — ClarificationPanel renders
+      const data = await callEndpoint(query, country, family, {});
+
+      if (data.mode === 'clarify') {
+        setClarifyQuestions(data.questions);
+        setSearchStatus('');
+        setPhase('clarifying');
+        return;
       }
 
-      await runSearch(query, country, family, {});
-    } catch {
-      await runSearch(query, country, family, {});
+      setSearchStatus('Ranking matches…');
+      await delay(100);
+      setSearchStatus('');
+      setResult(data);
+      setPhase('done');
+    } catch (err) {
+      setSearchStatus('');
+      toast.error(err instanceof Error ? err.message : 'Network error — please try again');
+      setPhase('idle');
     }
   };
 
-  const handleClarificationSubmit = (answers: Record<string, string>) => {
-    runSearch(pendingQuery, pendingCountry, pendingFamily, answers);
+  const handleClarificationSubmit = async (answers: Record<string, string>) => {
+    setPhase('searching');
+    setSearchStatus('Searching product catalog…');
+
+    try {
+      const data = await callEndpoint(pendingQuery, pendingCountry, pendingFamily, answers);
+
+      setSearchStatus('Ranking matches…');
+      await delay(100);
+      setSearchStatus('');
+
+      // If somehow still gets clarify (shouldn't happen), fall through to results
+      if (data.mode === 'results') {
+        setResult(data);
+      }
+      setPhase('done');
+    } catch (err) {
+      setSearchStatus('');
+      toast.error(err instanceof Error ? err.message : 'Network error — please try again');
+      setPhase('idle');
+    }
+  };
+
+  const handleSkip = async () => {
+    setPhase('searching');
+    setSearchStatus('Searching product catalog…');
+
+    try {
+      // _skip flag tells the endpoint to bypass variant detection
+      const data = await callEndpoint(pendingQuery, pendingCountry, pendingFamily, { _skip: 'true' });
+
+      setSearchStatus('Ranking matches…');
+      await delay(100);
+      setSearchStatus('');
+
+      if (data.mode === 'results') {
+        setResult(data);
+      }
+      setPhase('done');
+    } catch (err) {
+      setSearchStatus('');
+      toast.error(err instanceof Error ? err.message : 'Network error — please try again');
+      setPhase('idle');
+    }
   };
 
   const handleApprove = async (match: MatchResult) => {
@@ -167,9 +207,7 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
     }
   };
 
-  const isLoadingQuery =
-    phase === 'searching' ||
-    (phase === 'clarifying' && clarifyQuestions.length === 0);
+  const isLoadingQuery = phase === 'searching';
 
   return (
     <div className="space-y-6">
@@ -178,25 +216,7 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
         <QueryBox onSubmit={handleQuery} isLoading={isLoadingQuery} families={families} />
       </div>
 
-      {/* Clarify in-flight spinner */}
-      {phase === 'clarifying' && clarifyQuestions.length === 0 && (
-        <div className="flex items-center gap-2 text-sm text-gray-500">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Checking catalog…
-        </div>
-      )}
-
-      {/* Clarification panel */}
-      {phase === 'clarifying' && clarifyQuestions.length > 0 && (
-        <ClarificationPanel
-          questions={clarifyQuestions}
-          onSubmit={handleClarificationSubmit}
-          onSkip={() => runSearch(pendingQuery, pendingCountry, pendingFamily, {})}
-          isLoading={false}
-        />
-      )}
-
-      {/* Loading skeleton + progress status */}
+      {/* Searching: status + skeleton */}
       {phase === 'searching' && (
         <>
           {searchStatus && (
@@ -207,6 +227,16 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
           )}
           <SkeletonCardList />
         </>
+      )}
+
+      {/* Clarification panel */}
+      {phase === 'clarifying' && clarifyQuestions.length > 0 && (
+        <ClarificationPanel
+          questions={clarifyQuestions}
+          onSubmit={handleClarificationSubmit}
+          onSkip={handleSkip}
+          isLoading={false}
+        />
       )}
 
       {/* Results */}
