@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { Globe, Loader2 } from 'lucide-react';
 import QueryBox from '@/components/QueryBox';
@@ -16,13 +16,20 @@ interface QueryPageClientProps {
   engineerId: string;
 }
 
+function delay(ms: number) {
+  return new Promise<void>((r) => setTimeout(r, ms));
+}
+
 export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
   const [phase, setPhase] = useState<Phase>('idle');
   const [pendingQuery, setPendingQuery] = useState('');
   const [pendingCountry, setPendingCountry] = useState('');
+  const [pendingFamily, setPendingFamily] = useState('');
   const [clarifyQuestions, setClarifyQuestions] = useState<ClarificationQuestion[]>([]);
   const [result, setResult] = useState<QueryMatchResponse | null>(null);
   const [lastCountry, setLastCountry] = useState('');
+  const [searchStatus, setSearchStatus] = useState('');
+  const [families, setFamilies] = useState<string[]>([]);
   const [approvedSku, setApprovedSku] = useState<string | null>(null);
   const [feedbackModal, setFeedbackModal] = useState<{ open: boolean; match: MatchResult | null }>({
     open: false,
@@ -30,21 +37,36 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
   });
   const [submittingFeedback, setSubmittingFeedback] = useState(false);
 
-  const runSearch = async (query: string, country: string, answers: Record<string, string>) => {
+  // Load product families on mount
+  useEffect(() => {
+    fetch('/api/query/families')
+      .then((r) => r.json())
+      .then((d) => setFamilies(d.families ?? []))
+      .catch(() => {});
+  }, []);
+
+  const runSearch = async (query: string, country: string, family: string, answers: Record<string, string>) => {
     setPhase('searching');
     try {
+      setSearchStatus('Understanding your query…');
+      await delay(300);
+      setSearchStatus('Searching product catalog…');
+
       const res = await fetch('/api/query/match', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query,
           country: country || undefined,
+          family: family || undefined,
           engineer_id: engineerId,
           clarificationAnswers: Object.keys(answers).length > 0 ? answers : undefined,
         }),
       });
 
+      setSearchStatus('Ranking matches…');
       const data = await res.json();
+      setSearchStatus('');
 
       if (!res.ok) {
         toast.error(data.error ?? 'Failed to fetch matches');
@@ -55,15 +77,17 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
       setResult(data as QueryMatchResponse);
       setPhase('done');
     } catch {
+      setSearchStatus('');
       toast.error('Network error — please try again');
       setPhase('idle');
     }
   };
 
-  const handleQuery = async (query: string, country: string) => {
+  const handleQuery = async (query: string, country: string, family: string) => {
     setPhase('clarifying');
     setPendingQuery(query);
     setPendingCountry(country);
+    setPendingFamily(family);
     setResult(null);
     setApprovedSku(null);
     setLastCountry(country);
@@ -73,27 +97,24 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
       const clarifyRes = await fetch('/api/query/clarify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({ query, family: family || undefined }),
       });
       const clarifyData = await clarifyRes.json();
       const questions: ClarificationQuestion[] = clarifyData.questions ?? [];
 
       if (questions.length > 0) {
         setClarifyQuestions(questions);
-        // Stay in 'clarifying' phase — ClarificationPanel renders below
-        return;
+        return; // stay in 'clarifying' — ClarificationPanel renders
       }
 
-      // No questions needed — search directly
-      await runSearch(query, country, {});
+      await runSearch(query, country, family, {});
     } catch {
-      // Clarify failed — search directly
-      await runSearch(query, country, {});
+      await runSearch(query, country, family, {});
     }
   };
 
   const handleClarificationSubmit = (answers: Record<string, string>) => {
-    runSearch(pendingQuery, pendingCountry, answers);
+    runSearch(pendingQuery, pendingCountry, pendingFamily, answers);
   };
 
   const handleApprove = async (match: MatchResult) => {
@@ -146,8 +167,6 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
     }
   };
 
-  // Disable the query form while a search is in progress or while waiting
-  // for the clarify response (questions not yet loaded)
   const isLoadingQuery =
     phase === 'searching' ||
     (phase === 'clarifying' && clarifyQuestions.length === 0);
@@ -156,7 +175,7 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
     <div className="space-y-6">
       {/* Query form */}
       <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-        <QueryBox onSubmit={handleQuery} isLoading={isLoadingQuery} />
+        <QueryBox onSubmit={handleQuery} isLoading={isLoadingQuery} families={families} />
       </div>
 
       {/* Clarify in-flight spinner */}
@@ -172,18 +191,28 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
         <ClarificationPanel
           questions={clarifyQuestions}
           onSubmit={handleClarificationSubmit}
-          onSkip={() => runSearch(pendingQuery, pendingCountry, {})}
+          onSkip={() => runSearch(pendingQuery, pendingCountry, pendingFamily, {})}
           isLoading={false}
         />
       )}
 
-      {/* Loading skeleton */}
-      {phase === 'searching' && <SkeletonCardList />}
+      {/* Loading skeleton + progress status */}
+      {phase === 'searching' && (
+        <>
+          {searchStatus && (
+            <div className="flex items-center gap-2 text-sm text-gray-500">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-900 border-t-transparent" />
+              {searchStatus}
+            </div>
+          )}
+          <SkeletonCardList />
+        </>
+      )}
 
       {/* Results */}
       {phase === 'done' && result && (
         <div className="space-y-3">
-          <div className="flex items-center gap-3 text-xs text-gray-500">
+          <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
             <Globe className="h-3.5 w-3.5" />
             <span>
               Detected language: <strong>{result.detected_language}</strong>
@@ -191,13 +220,11 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
             {lastCountry && (
               <>
                 <span className="text-gray-300">|</span>
-                <span>
-                  Region: <strong>{lastCountry}</strong>
-                </span>
+                <span>Region: <strong>{lastCountry}</strong></span>
               </>
             )}
             <span className="text-gray-300">|</span>
-            <span>{result.matches.length} matches found</span>
+            <span>{result.total} matches found</span>
           </div>
 
           <MatchList

@@ -5,18 +5,20 @@ import { Search, Loader2 } from 'lucide-react';
 import CountrySelector from './CountrySelector';
 
 interface QueryBoxProps {
-  onSubmit: (query: string, country: string) => void;
+  onSubmit: (query: string, country: string, family: string) => void;
   isLoading?: boolean;
+  families?: string[];
 }
 
-export default function QueryBox({ onSubmit, isLoading }: QueryBoxProps) {
+export default function QueryBox({ onSubmit, isLoading, families = [] }: QueryBoxProps) {
   const [query, setQuery] = useState('');
   const [country, setCountry] = useState('');
+  const [family, setFamily] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!query.trim()) return;
-    onSubmit(query.trim(), country);
+    onSubmit(query.trim(), country, family);
   };
 
   return (
@@ -35,14 +37,33 @@ export default function QueryBox({ onSubmit, isLoading }: QueryBoxProps) {
         />
       </div>
 
-      <div className="flex items-end gap-3">
-        <div className="flex-1">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div>
           <label className="mb-1.5 block text-sm font-medium text-gray-700">
-            Region <span className="text-gray-400 font-normal text-xs">(optional)</span>
+            Product Family <span className="text-xs font-normal text-gray-400">(optional)</span>
+          </label>
+          <select
+            value={family}
+            onChange={(e) => setFamily(e.target.value)}
+            disabled={isLoading}
+            className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-900 focus:outline-none focus:ring-1 focus:ring-blue-900 disabled:bg-gray-50 disabled:text-gray-500"
+          >
+            <option value="">All families…</option>
+            {families.map((f) => (
+              <option key={f} value={f}>{f}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="mb-1.5 block text-sm font-medium text-gray-700">
+            Region <span className="text-xs font-normal text-gray-400">(optional)</span>
           </label>
           <CountrySelector value={country} onChange={setCountry} disabled={isLoading} />
         </div>
+      </div>
 
+      <div className="flex justify-end">
         <button
           type="submit"
           disabled={!query.trim() || isLoading}

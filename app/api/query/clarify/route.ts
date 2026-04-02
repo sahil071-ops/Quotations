@@ -6,17 +6,27 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
-    const { query } = await req.json();
+    const { query, family } = await req.json() as { query: string; family?: string };
     if (!query) return NextResponse.json({ error: 'query is required' }, { status: 400 });
 
     const adminSupabase = createAdminSupabaseClient();
-    const { data: products } = await adminSupabase
+
+    // Use first word for a broader name match so we get more product variants
+    const firstWord = query.split(' ')[0];
+
+    let dbQuery = adminSupabase
       .from('products')
       .select('name')
-      .ilike('name', `%${query}%`)
-      .limit(20);
+      .ilike('name', `%${firstWord}%`)
+      .eq('is_active', true);
 
-    const sampleNames = (products ?? []).map((p: { name: string }) => p.name).filter(Boolean);
+    if (family) {
+      dbQuery = dbQuery.eq('family', family);
+    }
+
+    const { data: products } = await dbQuery.limit(40);
+
+    const sampleNames = [...new Set((products ?? []).map((p: { name: string }) => p.name).filter(Boolean))];
     const questions = await generateClarifications(query, sampleNames);
 
     if (questions.length === 0) {

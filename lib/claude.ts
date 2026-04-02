@@ -4,6 +4,7 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 export interface ProductMatch {
   sku: string;
+  score: number;
   confidence: 'high' | 'medium' | 'low';
   reasoning: string;
 }
@@ -39,7 +40,7 @@ Respond with JSON only, no explanation: {"mode": "generic"} or {"mode": "specifi
     const result = JSON.parse(content.text.trim()) as { mode: string };
     return result.mode === 'generic' ? 'generic' : 'specific';
   } catch {
-    return 'specific'; // fail open — better to search than stall
+    return 'specific';
   }
 }
 
@@ -48,11 +49,11 @@ export async function generateClarifications(
   sampleNames: string[]
 ): Promise<ClarificationQuestion[]> {
   try {
-    const sampleText = sampleNames.slice(0, 8).join('\n');
+    const sampleText = sampleNames.slice(0, 40).join('\n');
 
     const message = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 400,
+      max_tokens: 600,
       temperature: 0,
       messages: [{
         role: 'user',
@@ -70,13 +71,14 @@ Step 2: Identify which attributes are still AMBIGUOUS — meaning the catalog ha
 Step 3: Generate clarifying questions ONLY for ambiguous attributes. Maximum 3 questions. If fewer than 3 attributes are ambiguous, generate fewer questions. If all key attributes are already specified, return an empty questions array.
 
 Rules:
-- Only ask about attributes visible in the product names above
+- Extract ALL distinct values for each attribute from the product names above — do not limit options
+- Always add "Other (please specify)" as the second-to-last option
+- Always add "Not sure" as the very last option
 - Keep question labels short (under 6 words)
-- Always include "Not sure" as the last option
 - Never ask about price, quantity, or delivery
 
 Respond with JSON only, no explanation:
-{"specifiedAttributes": ["material: copper"], "questions": [{"id": "q1", "question": "Length?", "type": "select", "options": ["1200mm", "3000mm", "Not sure"]}]}`,
+{"specifiedAttributes": ["material: copper"], "questions": [{"id": "q1", "question": "Length?", "type": "select", "options": ["1200mm", "1500mm", "3000mm", "Other (please specify)", "Not sure"]}]}`,
       }],
     });
 
@@ -101,38 +103,39 @@ export async function rankProductMatches(
     specifications?: Record<string, unknown> | null;
   }>
 ): Promise<ProductMatch[]> {
-  const candidateText = candidates
-    .map(
-      (c, i) =>
-        `${i + 1}. SKU: ${c.sku} | Name: ${c.name} | Family: ${c.family ?? 'N/A'} | Description: ${c.description ?? 'N/A'} | Specs: ${
-          c.specifications ? JSON.stringify(c.specifications) : 'N/A'
-        }`
-    )
-    .join('\n');
+  const candidateList = candidates.map((c) => ({
+    sku: c.sku,
+    name: c.name,
+    family: c.family ?? null,
+    specifications: c.specifications ?? null,
+  }));
 
   const countryNote = country
     ? `Country context: ${country}. Prefer products available in this country.`
     : '';
 
   const systemPrompt = `You are a product matching expert for Axis India, an industrial technology company.
-Given a client query and a list of candidate products from the Axis catalog, return the top matches ranked by relevance.
+Rate each candidate product for relevance to the engineer's query.
+Return ONLY products with a relevance score of 60 or above — return ALL of them, even if that is 30+ products.
+Do NOT apply an arbitrary limit.
 
-For each match return:
-- sku: the product SKU
-- confidence: high | medium | low
-- reasoning: one sentence explaining why this is a match (in English, regardless of input language)
-
-The client query may be in any language, use competitor part numbers, or use informal descriptions. Use your knowledge of industrial products to interpret the query correctly.
+Scoring guide:
+- 85–100 (high): exact or very close match — dimensions, material, standard all align
+- 70–84 (medium): good match with one minor difference or missing spec
+- 60–69 (low): plausible match but missing key information
+- Below 60: omit entirely
 ${countryNote}
 
-Return ONLY a JSON array with no preamble or markdown. Format:
-[{"sku": "...", "confidence": "...", "reasoning": "..."}]`;
+The query may be in any language, use competitor part numbers, or informal descriptions.
 
-  const userMessage = `Client query: ${query}\n\nCandidate products:\n${candidateText}`;
+Return ONLY this JSON, no preamble:
+{"matches": [{"sku": "...", "score": 95, "confidence": "high", "reasoning": "one sentence in English"}]}`;
+
+  const userMessage = `Engineer query: ${query}\n\nCandidates:\n${JSON.stringify(candidateList)}`;
 
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
-    max_tokens: 2048,
+    max_tokens: 4096,
     temperature: 0,
     system: systemPrompt,
     messages: [{ role: 'user', content: userMessage }],
@@ -141,8 +144,10 @@ Return ONLY a JSON array with no preamble or markdown. Format:
   const content = message.content[0];
   if (content.type !== 'text') throw new Error('Unexpected response type from Claude');
 
-  const matches = JSON.parse(content.text) as ProductMatch[];
-  return matches.slice(0, 10);
+  const result = JSON.parse(content.text) as { matches: ProductMatch[] };
+  return (result.matches ?? [])
+    .filter((m) => m.score >= 60)
+    .sort((a, b) => b.score - a.score);
 }
 
 export async function detectLanguage(text: string): Promise<string> {

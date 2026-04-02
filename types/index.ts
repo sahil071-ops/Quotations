@@ -83,6 +83,7 @@ export interface MatchResult {
   name: string;
   confidence: 'high' | 'medium' | 'low';
   reasoning: string;
+  score?: number;
   family?: string | null;
   specifications?: Record<string, unknown> | null;
   description?: string | null;
@@ -92,6 +93,7 @@ export interface QueryMatchResponse {
   query_id: string;
   detected_language: string;
   matches: MatchResult[];
+  total: number;
 }
 
 export interface ClarificationQuestion {

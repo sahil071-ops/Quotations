@@ -7,33 +7,34 @@ import type { MatchResult, QueryMatchResponse } from '@/types';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { query, country, engineer_id, clarificationAnswers } = body as {
+    const { query, country, engineer_id, clarificationAnswers, family } = body as {
       query: string;
       country?: string;
       engineer_id: string;
       clarificationAnswers?: Record<string, string>;
+      family?: string;
     };
 
     if (!query) {
       return NextResponse.json({ error: 'query is required' }, { status: 400 });
     }
 
-    // Build enriched query by appending clarification answers (skip "Not sure")
+    // Build enriched query — append clarification answers, skip non-values
     const enrichedQuery =
       clarificationAnswers && Object.keys(clarificationAnswers).length > 0
         ? `${query} ${Object.values(clarificationAnswers)
-            .filter((v) => v && v !== 'Not sure')
+            .filter((v) => v && v !== 'Not sure' && v !== 'Other (please specify)')
             .join(' ')}`.trim()
         : query;
 
     const adminSupabase = createAdminSupabaseClient();
 
-    // 1. Detect language (uses original query, not enriched)
+    // 1. Detect language (uses original query)
     let detectedLanguage = 'Unknown';
     try {
       detectedLanguage = await detectLanguage(query);
     } catch {
-      // Non-critical — continue
+      // Non-critical
     }
 
     // 2. Check competitor cross-refs for any part numbers in query
@@ -67,10 +68,10 @@ export async function POST(req: NextRequest) {
       (f: { correct_sku: string }) => f.correct_sku
     ) ?? [];
 
-    // 5. Vector search — fetch more candidates so country re-ranking has room to work
+    // 5. Vector search — 50 candidates to give Claude a wide pool
     const { data: vectorResults, error: searchError } = await adminSupabase.rpc('match_products', {
       query_embedding: embeddingStr,
-      match_count: 30,
+      match_count: 50,
     });
 
     if (searchError) {
@@ -78,51 +79,60 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Search failed' }, { status: 500 });
     }
 
-    const candidates = vectorResults ?? [];
+    let candidates: Array<{ sku: string; distance: number }> = vectorResults ?? [];
+
+    // 5b. Filter by family if provided
+    if (family) {
+      const { data: familySkus } = await adminSupabase
+        .from('products')
+        .select('sku')
+        .eq('family', family);
+      const familySkuSet = new Set((familySkus ?? []).map((p: { sku: string }) => p.sku));
+      candidates = candidates.filter((c) => familySkuSet.has(c.sku));
+    }
 
     // 6. Boost competitor SKUs and feedback corrections to top
     const boostedSkus = Array.from(new Set([...competitorBoosts, ...feedbackBoostSkus]));
-    candidates.sort((a: { sku: string; distance: number }, b: { sku: string; distance: number }) => {
+    candidates.sort((a, b) => {
       const aBoost = boostedSkus.includes(a.sku) ? -1 : 0;
       const bBoost = boostedSkus.includes(b.sku) ? -1 : 0;
       if (aBoost !== bBoost) return aBoost - bBoost;
       return a.distance - b.distance;
     });
 
-    // 7. Ask Claude to rank and reason (pass top 20 candidates)
-    const MAX_RESULTS = 10;
-    let claudeMatches: Array<{ sku: string; confidence: string; reasoning: string }> = [];
+    // 7. Ask Claude to score candidates — returns all with score ≥ 60
+    let claudeMatches: Array<{ sku: string; score: number; confidence: string; reasoning: string }> = [];
     try {
-      claudeMatches = await rankProductMatches(enrichedQuery, country ?? '', candidates.slice(0, 20));
+      claudeMatches = await rankProductMatches(enrichedQuery, country ?? '', candidates.slice(0, 50));
     } catch (err) {
       console.error('Claude ranking failed:', err);
-      claudeMatches = candidates.slice(0, MAX_RESULTS).map((c: { sku: string }, i: number) => ({
+      claudeMatches = candidates.slice(0, 10).map((c, i) => ({
         sku: c.sku,
-        confidence: i === 0 ? 'medium' : 'low',
+        score: 65 - i * 2,
+        confidence: i < 2 ? 'medium' : 'low',
         reasoning: 'AI reasoning unavailable — based on semantic similarity',
       }));
     }
 
-    // 7b. Pad to MAX_RESULTS with remaining vector candidates if Claude returned fewer
-    if (claudeMatches.length < MAX_RESULTS) {
-      const claudeSkus = new Set(claudeMatches.map((m) => m.sku));
-      const padding = (candidates as Array<{ sku: string }>)
-        .filter((c) => !claudeSkus.has(c.sku))
-        .slice(0, MAX_RESULTS - claudeMatches.length);
-      for (const c of padding) {
-        claudeMatches.push({ sku: c.sku, confidence: 'low', reasoning: 'Additional match based on semantic similarity' });
-      }
+    // Fallback: if Claude returned nothing, show top vector results
+    if (claudeMatches.length === 0) {
+      claudeMatches = candidates.slice(0, 5).map((c, i) => ({
+        sku: c.sku,
+        score: 60 - i,
+        confidence: 'low',
+        reasoning: 'No strong matches found — showing nearest results',
+      }));
     }
 
-    // 8. Override reasoning for feedback-boosted results
+    // 8. Override for feedback-boosted results
     claudeMatches = claudeMatches.map((m) => {
       if (feedbackBoostSkus.includes(m.sku)) {
-        return { ...m, confidence: 'high', reasoning: 'Based on previous engineer correction' };
+        return { ...m, score: 100, confidence: 'high', reasoning: 'Based on previous engineer correction' };
       }
       return m;
     });
 
-    // 9. Fetch full product details for top matches
+    // 9. Fetch full product details
     const topSkus = claudeMatches.map((m) => m.sku);
     const { data: products } = await adminSupabase
       .from('products')
@@ -139,16 +149,14 @@ export async function POST(req: NextRequest) {
         name: product?.name ?? m.sku,
         confidence: m.confidence as 'high' | 'medium' | 'low',
         reasoning: m.reasoning,
+        score: m.score,
         family: product?.family ?? null,
         specifications: product?.specifications ?? null,
         description: product?.description ?? null,
       };
     });
 
-    // 9b. Country tier re-ranking (only when a country is provided)
-    // Tier 0: country is in product.countries  →  shows first
-    // Tier 1: product.countries is empty/null   →  shows second
-    // Tier 2: product.countries is set but doesn't include country → shows last
+    // 9b. Country tier re-ranking (stable — preserves score order within each tier)
     if (country) {
       const countryTier = (sku: string): number => {
         const prod = productMap[sku];
@@ -157,12 +165,13 @@ export async function POST(req: NextRequest) {
         if (countries.includes(country)) return 0;
         return 2;
       };
-      matches.sort((a, b) => countryTier(a.sku) - countryTier(b.sku));
+      matches.sort((a, b) => {
+        const tierDiff = countryTier(a.sku) - countryTier(b.sku);
+        if (tierDiff !== 0) return tierDiff;
+        return (b.score ?? 0) - (a.score ?? 0); // preserve score order within tier
+      });
       matches = matches.map((m, i) => ({ ...m, rank: i + 1 }));
     }
-
-    // Trim to MAX_RESULTS
-    matches = matches.slice(0, MAX_RESULTS);
 
     // 10. Log query
     const { data: queryLog } = await adminSupabase
@@ -181,6 +190,7 @@ export async function POST(req: NextRequest) {
       query_id: queryLog?.id ?? '',
       detected_language: detectedLanguage,
       matches,
+      total: matches.length,
     };
 
     return NextResponse.json(response);
