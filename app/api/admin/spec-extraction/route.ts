@@ -94,23 +94,34 @@ Respond with valid JSON only, no explanation, no markdown:`,
       });
     }
 
-    const updateErrors: string[] = [];
     let updated = 0;
 
-    for (const product of products) {
-      const specs = specsMap[product.sku];
-      if (!specs || Object.keys(specs).length === 0) continue;
+    const updates = products
+      .map(product => {
+        const specs = specsMap[product.sku];
+        if (!specs || Object.keys(specs).length === 0) return null;
+        return { id: product.id, specifications: specs };
+      })
+      .filter(Boolean);
 
-      const { error: updateError } = await supabase
+    if (updates.length > 0) {
+      const { error: upsertError, data: upsertData } = await supabase
         .from('products')
-        .update({ specifications: specs, updated_at: new Date().toISOString() })
-        .eq('id', product.id);
+        .upsert(updates, { onConflict: 'id' })
+        .select('id, sku');
 
-      if (updateError) {
-        updateErrors.push(`${product.sku}: ${updateError.message}`);
-      } else {
-        updated++;
+      if (upsertError) {
+        console.error('[SPEC EXTRACTION] Upsert error:', upsertError);
+        return Response.json({
+          done: false,
+          processed: products.length,
+          updated: 0,
+          nextOffset: offset + batchSize,
+          errors: [upsertError.message],
+        });
       }
+
+      updated = upsertData?.length || updates.length;
     }
 
     const isLastBatch = products.length < batchSize;
@@ -120,7 +131,6 @@ Respond with valid JSON only, no explanation, no markdown:`,
       processed: products.length,
       updated,
       nextOffset: isLastBatch ? null : offset + batchSize,
-      errors: updateErrors.length > 0 ? updateErrors : undefined,
     });
 
   } catch (err) {
