@@ -80,17 +80,21 @@ Respond with valid JSON only, no explanation, no markdown:`,
     });
 
     const data = await response.json();
-    const text = data.content?.[0]?.text?.trim() || '{}';
+    let text = data.content?.[0]?.text?.trim() || '{}';
+
+    // Strip markdown code fences if Haiku wrapped the response
+    text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
 
     let specsMap: Record<string, Record<string, unknown>> = {};
     try {
       specsMap = JSON.parse(text);
     } catch {
+      console.error('[SPEC EXTRACTION] JSON parse failed. Raw response:', text.slice(0, 500));
       return Response.json({
         done: false,
         processed: products.length,
         nextOffset: offset + batchSize,
-        errors: ['JSON parse failed for batch — skipped'],
+        errors: [`JSON parse failed — raw: ${text.slice(0, 200)}`],
       });
     }
 
