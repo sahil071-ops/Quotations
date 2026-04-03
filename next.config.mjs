@@ -9,11 +9,8 @@ try {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Prevent webpack from bundling these — they load from node_modules at runtime
-  serverExternalPackages: ['unpdf', 'xlsx'],
   experimental: {
-    // Legacy key for older 14.x patch compatibility
-    serverComponentsExternalPackages: ['unpdf', 'xlsx'],
+    serverExternalPackages: ['unpdf', 'xlsx'],
     serverActions: {
       bodySizeLimit: '10mb',
     },

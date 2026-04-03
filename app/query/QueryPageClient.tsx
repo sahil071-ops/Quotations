@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
-import { Globe, Loader2 } from 'lucide-react';
+import { Globe } from 'lucide-react';
 import QueryBox from '@/components/QueryBox';
 import MatchList from '@/components/MatchList';
 import FeedbackModal from '@/components/FeedbackModal';
