@@ -11,6 +11,7 @@ import {
   ChevronLeft,
   BookOpen,
   Tag,
+  Cpu,
 } from 'lucide-react';
 import { VersionBadge } from '@/components/VersionBadge';
 
@@ -22,6 +23,7 @@ const ADMIN_LINKS = [
   { href: '/admin/import', label: 'Import', icon: Upload },
   { href: '/admin/training', label: 'Training Data', icon: BookOpen },
   { href: '/admin/categories', label: 'Categories', icon: Tag },
+  { href: '/admin/spec-extraction', label: 'Spec Extraction', icon: Cpu },
 ];
 
 export default function AdminSidebar() {

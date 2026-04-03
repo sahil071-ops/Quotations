@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminSupabaseClient } from '@/lib/supabase';
 import { embedText } from '@/lib/embeddings';
 import { rankProductMatches, generateVariantQuestions, detectLanguage } from '@/lib/claude';
-import { enrichQueryWithMetric } from '@/lib/units';
+import { enrichQueryWithMetric, extractSpecsFromQuery } from '@/lib/units';
 import type { MatchResult, QueryMatchResponse } from '@/types';
 
 export const dynamic = 'force-dynamic';
@@ -43,11 +43,46 @@ export async function POST(req: NextRequest) {
     ]);
     const embeddingStr = `[${queryEmbedding.join(',')}]`;
 
-    // 3. Vector search — wide pool of 100 candidates
-    const { data: vectorResults, error: searchError } = await adminSupabase.rpc('match_products', {
-      query_embedding: embeddingStr,
-      match_count: 100,
-    });
+    // 3. Extract specs from query to determine search strategy
+    const querySpecs = extractSpecsFromQuery(enrichedQuery);
+    const hasSpecs = Object.keys(querySpecs).length > 0;
+
+    // 4. Vector or hybrid search — wide pool of 100 candidates
+    let vectorResults, searchError;
+
+    if (hasSpecs) {
+      const specFilters = {
+        ...(querySpecs.diameter_min != null && { diameter_mm: true, diameter_min: querySpecs.diameter_min, diameter_max: querySpecs.diameter_max }),
+        ...(querySpecs.length_min != null && { length_mm: true, length_min: querySpecs.length_min, length_max: querySpecs.length_max }),
+        ...(querySpecs.material && { material: querySpecs.material }),
+      };
+
+      const result = await adminSupabase.rpc('match_products_hybrid', {
+        query_embedding: embeddingStr,
+        spec_filters: specFilters,
+        family_filter: family || null,
+        match_count: 100,
+      });
+      vectorResults = result.data;
+      searchError = result.error;
+
+      // Fall back to standard search if hybrid RPC not yet deployed
+      if (searchError?.message?.includes('function match_products_hybrid')) {
+        const fallback = await adminSupabase.rpc('match_products', {
+          query_embedding: embeddingStr,
+          match_count: 100,
+        });
+        vectorResults = fallback.data;
+        searchError = fallback.error;
+      }
+    } else {
+      const result = await adminSupabase.rpc('match_products', {
+        query_embedding: embeddingStr,
+        match_count: 100,
+      });
+      vectorResults = result.data;
+      searchError = result.error;
+    }
 
     if (searchError) {
       console.error('Vector search error:', searchError);
