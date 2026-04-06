@@ -139,7 +139,8 @@ export async function rankProductMatches(
     family?: string | null;
     specifications?: Record<string, unknown> | null;
   }>,
-  originalQuery?: string
+  originalQuery?: string,
+  model: string = 'claude-sonnet-4-20250514'
 ): Promise<ProductMatch[]> {
   const candidateList = candidates.map((c) => ({
     sku: c.sku,
@@ -178,7 +179,7 @@ Return ONLY this JSON, no preamble:
   const userMessage = `Engineer query: ${query}\n\nCandidates:\n${JSON.stringify(candidateList)}`;
 
   const message = await anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514',
+    model,
     max_tokens: 4096,
     temperature: 0,
     system: systemPrompt,

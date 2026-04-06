@@ -6,30 +6,18 @@ import { Globe } from 'lucide-react';
 import QueryBox from '@/components/QueryBox';
 import MatchList from '@/components/MatchList';
 import FeedbackModal from '@/components/FeedbackModal';
-import ClarificationPanel from '@/components/ClarificationPanel';
 import { SkeletonCardList } from '@/components/SkeletonCard';
 import { ResultsFilter } from '@/components/ResultsFilter';
-import type { QueryMatchResponse, MatchResult, ClarificationQuestion } from '@/types';
+import type { QueryMatchResponse, MatchResult } from '@/types';
 
-// Phase machine:
-// idle → searching → clarifying (if variant family detected) → searching → done
-//                  → done (if no clarification needed)
-type Phase = 'idle' | 'searching' | 'clarifying' | 'done';
+type Phase = 'idle' | 'searching' | 'done';
 
 interface QueryPageClientProps {
   engineerId: string;
 }
 
-function delay(ms: number) {
-  return new Promise<void>((r) => setTimeout(r, ms));
-}
-
 export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
   const [phase, setPhase] = useState<Phase>('idle');
-  const [pendingQuery, setPendingQuery] = useState('');
-  const [pendingCountry, setPendingCountry] = useState('');
-  const [pendingFamily, setPendingFamily] = useState('');
-  const [clarifyQuestions, setClarifyQuestions] = useState<ClarificationQuestion[]>([]);
   const [result, setResult] = useState<QueryMatchResponse | null>(null);
   const [filteredMatches, setFilteredMatches] = useState<MatchResult[]>([]);
   const [lastCountry, setLastCountry] = useState('');
@@ -49,111 +37,36 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
       .catch(() => {});
   }, []);
 
-  const callEndpoint = async (
-    query: string,
-    country: string,
-    family: string,
-    clarificationAnswers: Record<string, string>
-  ) => {
-    const res = await fetch('/api/query/search-then-clarify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        query,
-        country: country || undefined,
-        family: family || undefined,
-        engineer_id: engineerId,
-        clarificationAnswers: Object.keys(clarificationAnswers).length > 0 ? clarificationAnswers : undefined,
-      }),
-    });
-
-    if (!res.ok) {
-      const data = await res.json();
-      throw new Error(data.error ?? 'Search failed');
-    }
-
-    return res.json() as Promise<
-      | { mode: 'clarify'; questions: ClarificationQuestion[]; candidateCount: number }
-      | ({ mode: 'results' } & QueryMatchResponse)
-    >;
-  };
-
   const handleQuery = async (query: string, country: string, family: string) => {
     setPhase('searching');
-    setPendingQuery(query);
-    setPendingCountry(country);
-    setPendingFamily(family);
     setResult(null);
+    setFilteredMatches([]);
     setApprovedSku(null);
     setLastCountry(country);
-    setClarifyQuestions([]);
+    setSearchStatus('Searching product catalog…');
 
     try {
-      setSearchStatus('Searching product catalog…');
-      await delay(300);
+      const res = await fetch('/api/query/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query,
+          country: country || undefined,
+          family: family || undefined,
+          engineer_id: engineerId,
+        }),
+      });
 
-      const data = await callEndpoint(query, country, family, {});
-
-      if (data.mode === 'clarify') {
-        setClarifyQuestions(data.questions);
-        setSearchStatus('');
-        setPhase('clarifying');
-        return;
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error ?? 'Search failed');
       }
 
-      setSearchStatus('Ranking matches…');
-      await delay(100);
+      const data = await res.json() as { mode: string } & QueryMatchResponse;
+
       setSearchStatus('');
       setResult(data);
       setFilteredMatches(data.matches ?? []);
-      setPhase('done');
-    } catch (err) {
-      setSearchStatus('');
-      toast.error(err instanceof Error ? err.message : 'Network error — please try again');
-      setPhase('idle');
-    }
-  };
-
-  const handleClarificationSubmit = async (answers: Record<string, string>) => {
-    setPhase('searching');
-    setSearchStatus('Searching product catalog…');
-
-    try {
-      const data = await callEndpoint(pendingQuery, pendingCountry, pendingFamily, answers);
-
-      setSearchStatus('Ranking matches…');
-      await delay(100);
-      setSearchStatus('');
-
-      // If somehow still gets clarify (shouldn't happen), fall through to results
-      if (data.mode === 'results') {
-        setResult(data);
-        setFilteredMatches(data.matches ?? []);
-      }
-      setPhase('done');
-    } catch (err) {
-      setSearchStatus('');
-      toast.error(err instanceof Error ? err.message : 'Network error — please try again');
-      setPhase('idle');
-    }
-  };
-
-  const handleSkip = async () => {
-    setPhase('searching');
-    setSearchStatus('Searching product catalog…');
-
-    try {
-      // _skip flag tells the endpoint to bypass variant detection
-      const data = await callEndpoint(pendingQuery, pendingCountry, pendingFamily, { _skip: 'true' });
-
-      setSearchStatus('Ranking matches…');
-      await delay(100);
-      setSearchStatus('');
-
-      if (data.mode === 'results') {
-        setResult(data);
-        setFilteredMatches(data.matches ?? []);
-      }
       setPhase('done');
     } catch (err) {
       setSearchStatus('');
@@ -212,13 +125,11 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
     }
   };
 
-  const isLoadingQuery = phase === 'searching';
-
   return (
     <div className="space-y-6">
       {/* Query form */}
       <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-        <QueryBox onSubmit={handleQuery} isLoading={isLoadingQuery} families={families} />
+        <QueryBox onSubmit={handleQuery} isLoading={phase === 'searching'} families={families} />
       </div>
 
       {/* Searching: status + skeleton */}
@@ -232,16 +143,6 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
           )}
           <SkeletonCardList />
         </>
-      )}
-
-      {/* Clarification panel */}
-      {phase === 'clarifying' && clarifyQuestions.length > 0 && (
-        <ClarificationPanel
-          questions={clarifyQuestions}
-          onSubmit={handleClarificationSubmit}
-          onSkip={handleSkip}
-          isLoading={false}
-        />
       )}
 
       {/* Results */}

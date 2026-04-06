@@ -117,13 +117,13 @@ export function extractSpecsFromQuery(query: string): QuerySpecs {
     specs.length_max = l * 1.08;
   }
 
-  // Extract material hints
+  // Extract material hints — only when explicitly mentioned
   if (q.includes('copper bond') || q.includes('copper-bond')) specs.material = 'copper bonded';
   else if (q.includes('pure copper') || q.includes('solid copper')) specs.material = 'pure copper';
-  else if (q.includes('stainless') || q.includes('ss316') || q.includes('ss304')) specs.material = 'stainless';
+  else if (q.includes('stainless') || q.includes('ss316') || q.includes('ss304')) specs.material = 'stainless steel';
   else if (q.includes('galvanised') || q.includes('galvanized') || q.includes('hdg')) specs.material = 'galvanised';
   else if (q.includes('brass')) specs.material = 'brass';
-  else if (q.includes('copper')) specs.material = 'copper';
+  // Note: 'copper' alone is not extracted — too ambiguous (e.g. "copper bonded earth rod" sets 'copper bonded' above)
 
   return specs;
 }
