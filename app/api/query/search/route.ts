@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
             .select('id, sku, name, family, specifications, countries, description, is_active')
             .ilike('name', `%${query.trim()}%`)
             .eq('is_active', true)
-            .limit(200)
+            .limit(500)
         : Promise.resolve({ data: [] as { id: string; sku: string; name: string; family: string | null; specifications: Record<string, unknown> | null; countries: string[] | null; description: string | null; is_active: boolean }[] }),
     ]);
     const embeddingStr = `[${queryEmbedding.join(',')}]`;
@@ -110,14 +110,21 @@ export async function POST(req: NextRequest) {
 
     // 6. Merge name-search results (for generic queries)
     const nameMatches = nameMatchesResult.data ?? [];
+    console.log('[NAME SEARCH] query:', query.trim(), '| total hits:', nameMatches.length);
+    console.log('[NAME SEARCH] First 5:', nameMatches.slice(0, 5).map(p => p.name));
+    console.log('[NAME SEARCH] Copper bonded count:', nameMatches.filter(p => p.name.toLowerCase().includes('copper bonded')).length);
+
     if (nameMatches.length > 0) {
       const existingSkus = new Set(candidates.map((c) => c.sku as string));
       nameMatches.forEach((p) => {
         if (!existingSkus.has(p.sku)) {
-          const record = { ...p, distance: 0.3 } as Record<string, unknown>;
+          const record = { ...p, distance: 0.5 } as Record<string, unknown>; // lower priority than vector hits
           candidates.push(record);
           productMap[p.sku] = record;
           existingSkus.add(p.sku);
+        } else {
+          // Already in vector results — keep the better (lower) vector distance, just update productMap
+          productMap[p.sku] = { ...productMap[p.sku], ...p };
         }
       });
     }
@@ -209,7 +216,7 @@ export async function POST(req: NextRequest) {
           if (tierDiff !== 0) return tierDiff;
           return ((a.distance as number) || 0.5) - ((b.distance as number) || 0.5);
         })
-        .slice(0, 100);
+        .slice(0, 300);
 
       const matches: MatchResult[] = sorted.map((p, i) => {
         const dist = (p.distance as number) || 0.5;
