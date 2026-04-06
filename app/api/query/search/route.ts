@@ -32,18 +32,32 @@ export async function POST(req: NextRequest) {
     const queryWords = query.trim().split(/\s+/);
     const isGenericQuery = queryWords.length <= 2 && !hasSpecs;
 
-    // 3. Parallel: embed + detect language + name search (for generic queries)
-    const [queryEmbedding, detectedLanguage, nameMatchesResult] = await Promise.all([
+    type ProductRow = { id: string; sku: string; name: string; family: string | null; specifications: Record<string, unknown> | null; countries: string[] | null; description: string | null; is_active: boolean };
+    const emptyNameResult = Promise.resolve({ data: [] as ProductRow[] });
+
+    // 3. Parallel: embed + detect language + primary name search + secondary name search
+    const [queryEmbedding, detectedLanguage, primaryMatchesResult, secondaryMatchesResult] = await Promise.all([
       embedText(enrichedQuery),
       detectLanguage(query).catch(() => 'Unknown'),
+      // Primary: name STARTS WITH query term — these are the product type itself
+      isGenericQuery
+        ? adminSupabase
+            .from('products')
+            .select('id, sku, name, family, specifications, countries, description, is_active')
+            .ilike('name', `${query.trim()}%`)
+            .eq('is_active', true)
+            .limit(300)
+        : emptyNameResult,
+      // Secondary: name CONTAINS term but doesn't start with it — accessories, clamps etc
       isGenericQuery
         ? adminSupabase
             .from('products')
             .select('id, sku, name, family, specifications, countries, description, is_active')
             .ilike('name', `%${query.trim()}%`)
+            .not('name', 'ilike', `${query.trim()}%`)
             .eq('is_active', true)
-            .limit(500)
-        : Promise.resolve({ data: [] as { id: string; sku: string; name: string; family: string | null; specifications: Record<string, unknown> | null; countries: string[] | null; description: string | null; is_active: boolean }[] }),
+            .limit(100)
+        : emptyNameResult,
     ]);
     const embeddingStr = `[${queryEmbedding.join(',')}]`;
 
@@ -109,24 +123,54 @@ export async function POST(req: NextRequest) {
       .filter(Boolean) as Array<Record<string, unknown>>;
 
     // 6. Merge name-search results (for generic queries)
-    const nameMatches = nameMatchesResult.data ?? [];
-    console.log('[NAME SEARCH] query:', query.trim(), '| total hits:', nameMatches.length);
-    console.log('[NAME SEARCH] First 5:', nameMatches.slice(0, 5).map(p => p.name));
-    console.log('[NAME SEARCH] Copper bonded count:', nameMatches.filter(p => p.name.toLowerCase().includes('copper bonded')).length);
+    const primaryMatches = primaryMatchesResult.data ?? [];
+    const secondaryMatches = secondaryMatchesResult.data ?? [];
+    console.log('[NAME SEARCH] query:', query.trim(), '| primary:', primaryMatches.length, '| secondary:', secondaryMatches.length);
+    console.log('[NAME SEARCH] Primary first 5:', primaryMatches.slice(0, 5).map(p => p.name));
+    console.log('[NAME SEARCH] Copper bonded count:', primaryMatches.filter(p => p.name.toLowerCase().includes('copper bonded')).length);
 
-    if (nameMatches.length > 0) {
+    if (primaryMatches.length > 0 || secondaryMatches.length > 0) {
       const existingSkus = new Set(candidates.map((c) => c.sku as string));
-      nameMatches.forEach((p) => {
+
+      // Primary matches (starts with query) — high priority, distance 0.15
+      primaryMatches.forEach((p) => {
         if (!existingSkus.has(p.sku)) {
-          const record = { ...p, distance: 0.5 } as Record<string, unknown>; // lower priority than vector hits
-          candidates.push(record);
-          productMap[p.sku] = record;
+          candidates.push({ ...p, distance: 0.15 } as Record<string, unknown>);
+          productMap[p.sku] = { ...p, distance: 0.15 };
           existingSkus.add(p.sku);
         } else {
-          // Already in vector results — keep the better (lower) vector distance, just update productMap
           productMap[p.sku] = { ...productMap[p.sku], ...p };
         }
       });
+
+      // Secondary matches (contains query, doesn't start with it) — low priority, distance 0.6
+      secondaryMatches.forEach((p) => {
+        if (!existingSkus.has(p.sku)) {
+          candidates.push({ ...p, distance: 0.6 } as Record<string, unknown>);
+          productMap[p.sku] = { ...p, distance: 0.6 };
+          existingSkus.add(p.sku);
+        }
+        // If already in primary or vector, skip — don't downgrade distance
+      });
+    }
+
+    // Fix 2: log insulation tape / unrelated vector hits
+    console.log('[INSULATION CHECK]', candidates.filter(c => (c.name as string)?.toLowerCase().includes('insulation')).map(c => ({ sku: c.sku, name: c.name, distance: c.distance })));
+
+    // Fix 2: if top-10 vector results are dominated by one family, drop unrelated families
+    //        that snuck in via weak vector similarity
+    if (isGenericQuery) {
+      const top10Families = candidates.slice(0, 10).map((c) => c.family as string).filter(Boolean);
+      const familyFreq: Record<string, number> = {};
+      top10Families.forEach((f) => { familyFreq[f] = (familyFreq[f] || 0) + 1; });
+      const [[topFamily, topCount] = ['', 0]] = Object.entries(familyFreq).sort(([, a], [, b]) => b - a);
+
+      if (topCount >= 7) {
+        // Top family dominates (≥7/10) — exclude products from other families unless very close match
+        candidates = candidates.filter(
+          (c) => c.family === topFamily || ((c.distance as number) || 1) < 0.2
+        );
+      }
     }
 
     // 7. Family filter
