@@ -8,6 +8,7 @@ import MatchList from '@/components/MatchList';
 import FeedbackModal from '@/components/FeedbackModal';
 import ClarificationPanel from '@/components/ClarificationPanel';
 import { SkeletonCardList } from '@/components/SkeletonCard';
+import { ResultsFilter } from '@/components/ResultsFilter';
 import type { QueryMatchResponse, MatchResult, ClarificationQuestion } from '@/types';
 
 // Phase machine:
@@ -30,6 +31,7 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
   const [pendingFamily, setPendingFamily] = useState('');
   const [clarifyQuestions, setClarifyQuestions] = useState<ClarificationQuestion[]>([]);
   const [result, setResult] = useState<QueryMatchResponse | null>(null);
+  const [filteredMatches, setFilteredMatches] = useState<MatchResult[]>([]);
   const [lastCountry, setLastCountry] = useState('');
   const [searchStatus, setSearchStatus] = useState('');
   const [families, setFamilies] = useState<string[]>([]);
@@ -103,6 +105,7 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
       await delay(100);
       setSearchStatus('');
       setResult(data);
+      setFilteredMatches(data.matches ?? []);
       setPhase('done');
     } catch (err) {
       setSearchStatus('');
@@ -125,6 +128,7 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
       // If somehow still gets clarify (shouldn't happen), fall through to results
       if (data.mode === 'results') {
         setResult(data);
+        setFilteredMatches(data.matches ?? []);
       }
       setPhase('done');
     } catch (err) {
@@ -148,6 +152,7 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
 
       if (data.mode === 'results') {
         setResult(data);
+        setFilteredMatches(data.matches ?? []);
       }
       setPhase('done');
     } catch (err) {
@@ -254,11 +259,20 @@ export default function QueryPageClient({ engineerId }: QueryPageClientProps) {
               </>
             )}
             <span className="text-gray-300">|</span>
-            <span>{result.total} matches found</span>
+            <span>
+              {filteredMatches.length < result.total
+                ? `${filteredMatches.length} of ${result.total} matches`
+                : `${result.total} matches found`}
+            </span>
           </div>
 
+          <ResultsFilter
+            results={result.matches}
+            onFiltered={(filtered) => setFilteredMatches(filtered as MatchResult[])}
+          />
+
           <MatchList
-            matches={result.matches}
+            matches={filteredMatches}
             onApprove={handleApprove}
             onCorrect={handleCorrect}
             approvedSku={approvedSku}

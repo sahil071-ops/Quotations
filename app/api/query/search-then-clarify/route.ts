@@ -110,6 +110,41 @@ export async function POST(req: NextRequest) {
       candidates = candidates.filter((c) => c.family === family);
     }
 
+    // 5a. SKU prefix expansion — fetch ALL variants of any dominant prefix (3+ hits)
+    const prefixCounts: Record<string, number> = {};
+    candidates.forEach((c) => {
+      const prefix = c.sku.match(/^[A-Z]+\d+/)?.[0];
+      if (prefix) prefixCounts[prefix] = (prefixCounts[prefix] || 0) + 1;
+    });
+
+    const expandPrefixes = Object.entries(prefixCounts)
+      .filter(([, count]) => count >= 3)
+      .map(([prefix]) => prefix);
+
+    if (expandPrefixes.length > 0) {
+      const expansionResults = await Promise.all(
+        expandPrefixes.map((prefix) =>
+          adminSupabase
+            .from('products')
+            .select('id, sku, name, family, specifications, countries, description, is_active')
+            .like('sku', `${prefix}%`)
+            .eq('is_active', true)
+            .limit(100)
+        )
+      );
+
+      const existingSkus = new Set(candidates.map((c) => c.sku));
+      expansionResults.forEach((result) => {
+        (result.data || []).forEach((product) => {
+          if (!existingSkus.has(product.sku)) {
+            candidates.push({ ...product, distance: 0.25 });
+            productMap[product.sku] = product;
+            existingSkus.add(product.sku);
+          }
+        });
+      });
+    }
+
     // 6. Competitor cross-ref boost lookup (run in parallel with what we have)
     const { data: crossrefs } = await adminSupabase
       .from('competitor_crossrefs')
@@ -146,6 +181,26 @@ export async function POST(req: NextRequest) {
     };
     candidates.sort((a, b) => countryTier(a) - countryTier(b));
 
+    // 8a. Filter by clarification answers when present
+    const realAnswerValues = clarificationAnswers
+      ? Object.values(clarificationAnswers).filter(
+          (v) => v && v !== 'Not sure' && v !== 'Other (please specify)' && v !== 'true' && v !== '_skip'
+        )
+      : [];
+
+    if (realAnswerValues.length > 0) {
+      const filtered = candidates.filter((c) => {
+        if (!c.specifications) return true; // keep products without specs
+        const specStr = JSON.stringify(c.specifications).toLowerCase();
+        return realAnswerValues.some(
+          (val) =>
+            specStr.includes(val.toLowerCase()) ||
+            (c.name || '').toLowerCase().includes(val.toLowerCase())
+        );
+      });
+      if (filtered.length >= 3) candidates = filtered;
+    }
+
     // 9. Variant family detection — only on the first call (no answers yet)
     const isFirstCall =
       !clarificationAnswers ||
@@ -164,7 +219,10 @@ export async function POST(req: NextRequest) {
       const [dominantFamily, count] =
         Object.entries(familyCounts).sort(([, a], [, b]) => b - a)[0] ?? ['', 0];
 
-      if (count >= 3 && dominantFamily) {
+      // Trigger clarification if: 10+ candidates (ambiguous query) OR dominant family has 3+ hits
+      const shouldClarify = candidates.length >= 10 || (count >= 3 && !!dominantFamily);
+
+      if (shouldClarify && dominantFamily) {
         // Fetch ALL variants in this family to give Claude the full option set
         const { data: allVariants } = await adminSupabase
           .from('products')
