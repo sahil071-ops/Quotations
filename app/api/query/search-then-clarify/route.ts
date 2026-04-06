@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
       searchError = result.error;
 
       // Fall back to standard search if hybrid RPC not yet deployed
-      if (searchError?.message?.includes('function match_products_hybrid')) {
+      if (searchError?.code === 'PGRST202' || searchError?.message?.includes('match_products_hybrid')) {
         const fallback = await adminSupabase.rpc('match_products', {
           query_embedding: embeddingStr,
           match_count: 100,
