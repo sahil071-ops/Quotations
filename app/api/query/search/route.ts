@@ -26,6 +26,7 @@ export async function POST(req: Request) {
     const parsed = parseQuery(query);
     console.log('[SEARCH] parsed:', JSON.stringify(parsed));
 
+    const t0 = Date.now();
     let matches: MatchResult[] = [];
     let searchMode = 'sql';
 
@@ -35,20 +36,38 @@ export async function POST(req: Request) {
       if (xrefMatches.length > 0) {
         matches = xrefMatches;
         searchMode = 'crossref';
+      } else {
+        // No cross-ref — return immediately, don't fall back to vector search
+        console.log('[SEARCH] Competitor query, no cross-ref found for:', parsed.competitorRef);
+        const { data: queryLog } = await supabase
+          .from('queries')
+          .insert({ engineer_id: engineer_id ?? null, raw_query: query, detected_language: null, country_context: country ?? null, top_matches: [] })
+          .select('id').single();
+        return Response.json({
+          mode: 'results',
+          query_id: queryLog?.id ?? '',
+          detected_language: '',
+          matches: [],
+          total: 0,
+          _searchMode: 'crossref_not_found',
+          message: `No cross-reference found for "${query}". Add it in Admin → Competitor X-Refs.`,
+        });
       }
     }
 
     // ── Step 2: SQL spec search (progressive fallback) ────────────────────
     if (matches.length === 0) {
       const sqlResults = await sqlSpecSearch(supabase, parsed, family, country);
+      console.log('[TIMING] SQL search:', Date.now() - t0, 'ms, results:', sqlResults.length);
       if (sqlResults.length > 0) {
         matches = sqlResults;
         searchMode = sqlResults[0]._source ?? 'sql';
       }
     }
 
-    // ── Step 3: Vector fallback for truly ambiguous queries ───────────────
-    if (matches.length === 0) {
+    // ── Step 3: Vector fallback — only for non-competitor, non-empty product type ──
+    if (matches.length === 0 && !parsed.isCompetitorQuery) {
+      console.log('[SEARCH] SQL returned 0 — triggering vector fallback');
       const { embedText } = await import('@/lib/embeddings');
       const embedding = await embedText(query);
       const embeddingStr = `[${embedding.join(',')}]`;
@@ -88,6 +107,7 @@ export async function POST(req: Request) {
           .sort((a, b) => (distMap[a.sku] ?? 1) - (distMap[b.sku] ?? 1));
 
         searchMode = 'vector_fallback';
+        console.log('[TIMING] Vector fallback:', Date.now() - t0, 'ms');
       }
     }
 
@@ -194,6 +214,17 @@ async function sqlSpecSearch(
       const confidence: MatchResult['confidence'] = level === 0 ? 'high' : level <= 2 ? 'medium' : 'low';
       const score = Math.max(100 - level * 12, 40);
 
+      // For name-only searches (level 6), sort so products whose names START WITH
+      // the product type rank above those that merely contain it
+      if (level === FILTER_LEVELS.length - 1 && parsed.productType) {
+        const pt = parsed.productType.toLowerCase();
+        rows.sort((a, b) => {
+          const aStarts = (a.name as string)?.toLowerCase().startsWith(pt) ? 0 : 1;
+          const bStarts = (b.name as string)?.toLowerCase().startsWith(pt) ? 0 : 1;
+          return aStarts - bStarts;
+        });
+      }
+
       return rows.map((p, i) => ({
         rank: i + 1,
         sku: p.sku as string,
@@ -238,26 +269,28 @@ async function executeSearch(
     q = q.ilike('specifications->>material', `%${specs.material}%`);
   }
 
+  // Use .filter() with ::float cast for numeric JSONB comparisons.
+  // Plain .gte()/.lte() on jsonb->>'field' compares as text ("9" > "10" alphabetically).
   if (filters.useDiameter && specs.diameter_min != null && specs.diameter_max != null) {
     q = q
-      .gte('specifications->>diameter_mm', specs.diameter_min)
-      .lte('specifications->>diameter_mm', specs.diameter_max);
+      .filter("(specifications->>'diameter_mm')::float", 'gte', specs.diameter_min)
+      .filter("(specifications->>'diameter_mm')::float", 'lte', specs.diameter_max);
   }
 
   if (filters.useLength && specs.length_min != null && specs.length_max != null) {
     if (filters.exactLength && specs.length_mm != null) {
-      q = q.eq('specifications->>length_mm', specs.length_mm);
+      q = q.filter("(specifications->>'length_mm')::float", 'eq', specs.length_mm);
     } else {
       q = q
-        .gte('specifications->>length_mm', specs.length_min)
-        .lte('specifications->>length_mm', specs.length_max);
+        .filter("(specifications->>'length_mm')::float", 'gte', specs.length_min)
+        .filter("(specifications->>'length_mm')::float", 'lte', specs.length_max);
     }
   }
 
   if (filters.useCS && specs.cross_section_min != null && specs.cross_section_max != null) {
     q = q
-      .gte('specifications->>cross_section_mm2', specs.cross_section_min)
-      .lte('specifications->>cross_section_mm2', specs.cross_section_max);
+      .filter("(specifications->>'cross_section_mm2')::float", 'gte', specs.cross_section_min)
+      .filter("(specifications->>'cross_section_mm2')::float", 'lte', specs.cross_section_max);
   }
 
   if (filters.useThread && specs.thread_type) {
